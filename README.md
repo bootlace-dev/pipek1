@@ -2,7 +2,7 @@
 
 A minimal, daemon-less UNIX stream filter implementing BIP-340 Schnorr release signing, Git commit verification, and authenticated stream encryption using Bitcoin and Nostr (`secp256k1`) keypairs.
 
-> **Status:** Specification v1.9.1 & Reference Implementation (BIP-340 Schnorr release signing, verification, Git commit plumbing, and full streaming ChaCha20-Poly1305 AEAD filter). Asymptotically audited and deterministic build verified. Open for peer review, testing, and adversarial critique. Do not use for high-value production secrets without independent verification.
+> **Status:** Specification v0.0.1-rc0 & Reference Implementation (BIP-340 Schnorr release signing, verification, Git commit plumbing, and full streaming ChaCha20-Poly1305 AEAD filter). Asymptotically audited and deterministic build verified. Open for peer review, testing, and adversarial critique. Do not use for high-value production secrets without independent verification.
 
 ---
 
@@ -81,14 +81,14 @@ cargo test --manifest-path rust/Cargo.toml --test cli_tests
 ./build_reproducible.sh
 
 # Target Binary Size: 1,036,912 bytes
-# Canonical SHA-256: 4dc846abc958bcab747bd3a7d6dd3c8f7b4c13046427eba3a6deb47941bef153
+# Canonical SHA-256: 7a92cebc4f91fcc103f00731292a95f9f55a706ec9a1d170754a24a79522dd5d
 ```
 
 ---
 
 ## Specification
 
-The complete, asymptotically audited technical specification is locked in [SPECIFICATION.md](SPECIFICATION.md) (v1.9.1).
+The complete, asymptotically audited technical specification is locked in [SPECIFICATION.md](SPECIFICATION.md) (v0.0.1-rc0).
 
 ---
 

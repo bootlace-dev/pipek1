@@ -1,6 +1,6 @@
 [package]
 name = "pipek1"
-version = "0.1.0"
+version = "0.0.1-rc0"
 edition = "2021"
 authors = ["bootlace-dev <bootlace-dev@users.noreply.github.com>"]
 description = "Pure stateless UNIX stream filter for BIP-340 Schnorr release signing and authenticated secp256k1 encryption"

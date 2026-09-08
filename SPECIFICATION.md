@@ -1,7 +1,7 @@
 # Design Specification: `pipek1` (Stateless UNIX Cryptographic Filter via Secp256k1)
 
 **Codename:** `pipek1`  
-**Status:** RFC / v1.9.1 (Asymptotically Audited & Deterministic Build Verified)  
+**Status:** RFC / v0.0.1-rc0 (Asymptotically Audited & Deterministic Build Verified)  
 **Target:** Direct drop-in, stateless replacement for GnuPG (`gpg`) across software release signing, git commit authentication, and stream encryption using Bitcoin and Nostr (`secp256k1`) keypairs.  
 **Architectural Invariants:**
 1. Pure stateless UNIX filter: zero daemons, zero background keyring state, zero database dependencies, zero network sockets compiled in.

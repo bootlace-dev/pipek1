@@ -8,7 +8,7 @@ PIPEK1="/home/bootlace/dev/pipek1/rust/target/release/pipek1"
 VECTORS="/home/bootlace/dev/pipek1/vectors/golden_vectors.json"
 
 echo "=================================================================="
-echo " PIPE-K1 PROTOCOL & TEST VECTOR SUITE (SPECIFICATION v1.9)"
+echo " PIPE-K1 PROTOCOL & TEST VECTOR SUITE (SPECIFICATION v1.9.1)"
 echo " Historical Entities: Constant, Calle, Blockstream, Liquid Whitehat"
 echo "=================================================================="
 echo ""

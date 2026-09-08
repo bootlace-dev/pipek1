@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 bootlace-dev
+
 """
 pipek1 First Child Key Derivation & Mutual Cross-Signing Harness
 Derives testing child key 0' per BIP-85 from master root,

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 bootlace-dev
+
 //! pipek1: Pure Stateless UNIX Cryptographic Filter (Specification v1.9)
 //! Anonymous / Zero-PII Invariant: bootlace-dev <bootlace-dev@users.noreply.github.com>
 

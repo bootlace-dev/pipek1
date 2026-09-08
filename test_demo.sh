@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 bootlace-dev
+
 set -euo pipefail
 
 PIPEK1="/home/bootlace/dev/pipek1/rust/target/release/pipek1"

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 bootlace-dev
+
 """
 pipek1 Canonical Test Vector Generator (Specification v1.9)
 Generates byte-exact wire headers, chunk framings, tagged hashes, and signatures

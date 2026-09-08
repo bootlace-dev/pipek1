@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 bootlace-dev
+ */
+
 /*
  * pipek1 Minimal C Verification Harness (Specification v1.9)
  * Asserts byte offsets, framing sizes, and tagged hash constants.

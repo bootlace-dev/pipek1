@@ -1,0 +1,26 @@
+{
+  "description": "Historical public keys and npubs from the Bitcoin / Liquid / Nostr ecosystem for pipek1 test vectors",
+  "entities": {
+    "blockstream_security": {
+      "role": "Liquid sidechain maintainer & security response",
+      "pgp_fingerprint": "1176 542D A98E 71E1 3372 2EF7 4AC8 CC88 6844 A2D6",
+      "synthetic_secp_pubkey_hex": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "notes": "Representing Blockstream security signing authority"
+    },
+    "calle": {
+      "role": "Cashu Chaumian ecash & Nostr protocol developer",
+      "npub": "npub1callevkhhkfedytkwcvwhxcr94f7w857hkeu4s989sn0x9f4a5ws6a6k7f",
+      "notes": "Pioneer of sovereign ecash / Nostr key convergence"
+    },
+    "constant": {
+      "role": "Cryptographer / Nostr systems architect",
+      "npub_event_author": "5ea4648045bb1ff222655ddd36e6dceddc43590c26090c486bef38ef450da5bd",
+      "notes": "Author of the 'cry' root key catastrophe doctrine"
+    },
+    "whitehat_liquid": {
+      "role": "Whitehat hacker from September 2026 Liquid 4,000 BTC incident",
+      "onchain_beacon": "OP_RETURN 'we are whitehats. contact us on chain'",
+      "notes": "Triggered the on-chain blockchain PGP negotiation"
+    }
+  }
+}

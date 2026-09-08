@@ -1,0 +1,5 @@
+target/
+*.o
+verify_c
+__pycache__/
+*.pyc

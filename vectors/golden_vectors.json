@@ -1,0 +1,31 @@
+{
+  "title": "pipek1 Specification v1.9 Golden Test Vectors",
+  "description": "Byte-exact test fixtures honoring Constant and Calle historical context",
+  "keys": {
+    "alice_constant": {
+      "sk_hex": "0000000000000000000000000000000000000000000000000000000000000001",
+      "pk_x_hex": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+    },
+    "bob_calle": {
+      "sk_hex": "0000000000000000000000000000000000000000000000000000000000000002",
+      "pk_x_hex": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5"
+    },
+    "ephemeral": {
+      "sk_hex": "0000000000000000000000000000000000000000000000000000000000000003",
+      "pk_x_hex": "f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9"
+    }
+  },
+  "tagged_hashes": {
+    "domain_sign": "pipek1/v1/sign",
+    "domain_auth": "pipek1/v1/auth",
+    "test_message": "hello pipek1 sovereign stream",
+    "timestamp": 1788865892,
+    "sign_tagged_hash_hex": "615396a1a6c77bea844cebc6409ffdad9a6eeceb8652826166a0e4f7c8a482ac"
+  },
+  "wire_framing": {
+    "header_97_hex": "504b30310101f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee50102030405060708090a0baee12ca1932b692d65d9aa42f7e1978c",
+    "header_length_bytes": 97,
+    "chunk_header_terminal_hex": "0000000c01",
+    "chunk_header_length_bytes": 5
+  }
+}

@@ -43,5 +43,11 @@
     "wire_header_97_hex": "504b3031010179be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5f1e2d3c4b5a69788796a5b476efe480365c4431f81ffd8c1c6b98c",
     "chunk_header_5_hex": "0000005201",
     "tagged_hash_sign_hex": "4c7a79789c27e2f5d580a681458244ddee5d2a73c2f7df2e9fbd0a6f629772a9"
+  },
+  "entropy_hedging_vector": {
+    "description": "Hybrid Entropy Hedging: TaggedHash('pipek1/v1/entropy', OsEntropy || PhysicalEntropy)",
+    "os_entropy_hex": "0000000000000000000000000000000000000000000000000000000000000001",
+    "physical_entropy_utf8": "d6:123456 coin:HHTTHTHH",
+    "hedged_scalar_hex": "0ee3a90478dd2dde4212027b3a6ed5362d02f414a4e449dfde1899ecfa781905"
   }
 }

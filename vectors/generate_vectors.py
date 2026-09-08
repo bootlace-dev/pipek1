@@ -64,6 +64,11 @@ def main():
     chk_a_hdr = struct.pack(">IB", len(msg_a), 0x01) # Terminal chunk
     chk_b_hdr = struct.pack(">IB", len(msg_b), 0x01) # Terminal chunk
 
+    # 5. Hybrid Entropy Hedging Vector (OsRng 32B + Physical Coin/Dice Entropy)
+    os_entropy_test = bytes.fromhex("0000000000000000000000000000000000000000000000000000000000000001")
+    phys_entropy_test = b"d6:123456 coin:HHTTHTHH"
+    th_entropy = tagged_hash("pipek1/v1/entropy", os_entropy_test + phys_entropy_test)
+
     manifest = {
         "title": "pipek1 Specification v1.9 Golden Test Vectors",
         "description": "Canonical byte-exact vectors utilizing real historical Bitcoin/Nostr entity keys",
@@ -81,6 +86,12 @@ def main():
             "wire_header_97_hex": wire_hdr_b.hex(),
             "chunk_header_5_hex": chk_b_hdr.hex(),
             "tagged_hash_sign_hex": th_b.hex()
+        },
+        "entropy_hedging_vector": {
+            "description": "Hybrid Entropy Hedging: TaggedHash('pipek1/v1/entropy', OsEntropy || PhysicalEntropy)",
+            "os_entropy_hex": os_entropy_test.hex(),
+            "physical_entropy_utf8": phys_entropy_test.decode('utf-8'),
+            "hedged_scalar_hex": th_entropy.hex()
         }
     }
 

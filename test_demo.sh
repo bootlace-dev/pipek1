@@ -72,6 +72,35 @@ else
     echo "  >> RESULT: MISMATCH"
     exit 1
 fi
+echo ""
+
+# 4b. Verify Hybrid Entropy Hedging Tagged Hash
+echo "[TEST 4b] Asserting Hybrid Entropy TaggedHash equivalence (Rust vs Golden Vector):"
+GOLDEN_ENTROPY_TH=$(python3 -c "
+import json
+with open('$VECTORS') as f:
+    v = json.load(f)
+print(v['entropy_hedging_vector']['hedged_scalar_hex'])
+")
+
+ACTUAL_ENTROPY_TH=$(python3 -c "
+import json, sys
+with open('$VECTORS') as f:
+    v = json.load(f)
+os_ent = bytes.fromhex(v['entropy_hedging_vector']['os_entropy_hex'])
+phys_ent = v['entropy_hedging_vector']['physical_entropy_utf8'].encode('utf-8')
+sys.stdout.buffer.write(os_ent + phys_ent)
+" | "$PIPEK1" hash "pipek1/v1/entropy")
+
+echo "  Golden Hash: $GOLDEN_ENTROPY_TH"
+echo "  Rust Output: $ACTUAL_ENTROPY_TH"
+
+if [ "$GOLDEN_ENTROPY_TH" = "$ACTUAL_ENTROPY_TH" ]; then
+    echo "  >> RESULT: EXACT MATCH (BIT-FOR-BIT IDENTICAL)"
+else
+    echo "  >> RESULT: MISMATCH"
+    exit 1
+fi
 
 echo ""
 echo "=================================================================="

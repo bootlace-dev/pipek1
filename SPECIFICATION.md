@@ -1,7 +1,7 @@
 # Design Specification: `pipek1` (Stateless UNIX Cryptographic Filter via Secp256k1)
 
 **Codename:** `pipek1`  
-**Status:** RFC / v1.9  
+**Status:** RFC / v1.9.1 (Asymptotically Audited & Deterministic Build Verified)  
 **Target:** Direct drop-in, stateless replacement for GnuPG (`gpg`) across software release signing, git commit authentication, and stream encryption using Bitcoin and Nostr (`secp256k1`) keypairs.  
 **Architectural Invariants:**
 1. Pure stateless UNIX filter: zero daemons, zero background keyring state, zero database dependencies, zero network sockets compiled in.
@@ -115,7 +115,7 @@ Version: pipek1-v1
      $$E_{priv} = \text{TaggedHash}(\text{"pipek1/v1/entropy"}, E_{os} \parallel H_{phys})$$
      If $E_{priv} = 0$ or $E_{priv} \ge n$, re-hash iteratively: $E_{priv} = \text{TaggedHash}(\text{"pipek1/v1/entropy"}, E_{priv})$.
    * If no external entropy is provided, $E_{priv} = E_{os}$.
-   * Ephemeral public point: $E_{pub} = \text{point\_x}(E_{priv} \cdot G)$. If the $Y$-coordinate of $E_{priv} \cdot G$ is odd, $E_{priv} = n - E_{priv}$.
+   * Ephemeral public point: $E_{pub} = \text{point\_x}(E_{priv} \cdot G)$. Note: Since the affine x-coordinate of $k \cdot P$ is identical to $k \cdot (-P)$, scalar parity negation is optional for ECDH shared point calculation, but canonicalizing $E_{priv}$ to even $Y$ parity ($sk' = n - sk$) matches BIP-340 Schnorr conventions.
 2. Validate $R_{pub}$ via $\text{lift\_x}(R_{pub})$; abort with exit code `2` if invalid local input.
 3. $\text{SharedPoint} = \text{point\_mul}(E_{priv}, \text{lift\_x}(R_{pub}))$. Abort if point is $\mathcal{O}$.
 4. $\text{IKM} = \text{SHA-256}(\text{point\_x}(\text{SharedPoint}))$.

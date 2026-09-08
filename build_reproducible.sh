@@ -15,7 +15,7 @@ docker run --rm \
     -w /code \
     -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
     -e TZ="$TZ" \
-    rust:alpine sh -c '
+    rust:alpine@sha256:a10e64dd139b7387337c7fbe8aca31b959b57b2fd4c8ae20a02cf1d6ea424dce sh -c '
         cargo clean
         RUSTFLAGS="--remap-path-prefix=/code=. --remap-path-prefix=/usr/local/cargo=. -C target-cpu=generic" cargo build --release
     '

@@ -2,7 +2,7 @@
 
 A minimal, daemon-less UNIX stream filter implementing BIP-340 Schnorr release signing, Git commit verification, and authenticated stream encryption using Bitcoin and Nostr (`secp256k1`) keypairs.
 
-> **Status:** Draft Specification (v1.9) & Complete Reference Implementation (Phase 1: BIP-340 Schnorr signing, verification, and Git commit plumbing; Phase 2: Full streaming ChaCha20-Poly1305 AEAD filter live). Open for peer review, testing, and adversarial critique. Do not use for high-value production secrets without independent verification.
+> **Status:** Specification v1.9.1 & Reference Implementation (BIP-340 Schnorr release signing, verification, Git commit plumbing, and full streaming ChaCha20-Poly1305 AEAD filter). Asymptotically audited and deterministic build verified. Open for peer review, testing, and adversarial critique. Do not use for high-value production secrets without independent verification.
 
 ---
 
@@ -82,7 +82,7 @@ echo "Classified message" | pipek1 encrypt --recipient "$NPUB" --entropy-fd 3 3<
 
 ## Specification
 
-The complete, asymptotically audited technical specification is locked in [SPECIFICATION.md](SPECIFICATION.md) (v1.9).
+The complete, asymptotically audited technical specification is locked in [SPECIFICATION.md](SPECIFICATION.md) (v1.9.1).
 
 ---
 

@@ -1017,6 +1017,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut sig_path = None;
             let mut expected_pub = None;
 
+            let mut pass_through = false;
+
             let mut i = 2;
             while i < args.len() {
                 match args[i].as_str() {
@@ -1032,22 +1034,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             i += 1;
                         }
                     }
+                    "--pass-through" => {
+                        pass_through = true;
+                    }
                     _ => {}
                 }
                 i += 1;
             }
 
+            if pass_through && expected_pub.is_none() {
+                eprintln!("Error: --pub <npub|hex> is mandatory when --pass-through is enabled");
+                std::process::exit(2);
+            }
+
             let path = sig_path.ok_or("Missing mandatory argument: --sig <file>")?;
-            let sig_data = std::fs::read(&path)
+            let sig_raw = std::fs::read(&path)
                 .map_err(|e| format!("Failed to read signature file '{}': {}", path, e))?;
 
-            if sig_data.len() != SIGNATURE_PAYLOAD_SIZE {
-                eprintln!("Error: Signature payload must be exactly {} bytes (got {})", SIGNATURE_PAYLOAD_SIZE, sig_data.len());
+            // Detach ASCII armor if present
+            let sig_bytes = if let Ok(s) = std::str::from_utf8(&sig_raw) {
+                if s.contains("BEGIN PGP SIGNATURE") {
+                    let mut b64 = String::new();
+                    let mut capture = false;
+                    for line in s.lines() {
+                        let tr = line.trim();
+                        if tr.contains("BEGIN PGP SIGNATURE") {
+                            capture = true;
+                            continue;
+                        }
+                        if tr.contains("END PGP SIGNATURE") {
+                            break;
+                        }
+                        if capture && !tr.is_empty() && !tr.contains(':') {
+                            b64.push_str(tr);
+                        }
+                    }
+                    base64::engine::general_purpose::STANDARD.decode(b64)
+                        .map_err(|e| format!("Base64 decode error: {}", e))?
+                } else {
+                    sig_raw
+                }
+            } else {
+                sig_raw
+            };
+
+            if sig_bytes.len() != SIGNATURE_PAYLOAD_SIZE {
+                eprintln!("Error: Signature payload must be exactly {} bytes (got {})", SIGNATURE_PAYLOAD_SIZE, sig_bytes.len());
                 std::process::exit(1);
             }
 
             let mut payload = [0u8; SIGNATURE_PAYLOAD_SIZE];
-            payload.copy_from_slice(&sig_data);
+            payload.copy_from_slice(&sig_bytes);
 
             let mut buffer = Vec::new();
             io::stdin().read_to_end(&mut buffer)?;
@@ -1062,8 +1099,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             eprintln!("Error: Signer key {} does not match expected key {}", signer_npub, exp);
                             std::process::exit(1);
                         }
+                    } else {
+                        eprintln!("Notice: Verifying against embedded untrusted pubkey {}", signer_npub);
                     }
-                    eprintln!("Notice: Cryptographic verification SUCCESS from {}", signer_npub);
+
+                    if pass_through {
+                        let mut stdout = io::stdout();
+                        stdout.write_all(&buffer)?;
+                        stdout.flush()?;
+                    } else {
+                        eprintln!("Notice: Cryptographic verification SUCCESS from {}", signer_npub);
+                    }
                     std::process::exit(0);
                 }
                 Err(e) => {

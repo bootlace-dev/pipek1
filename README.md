@@ -8,15 +8,26 @@ A minimal, daemon-less UNIX stream filter implementing BIP-340 Schnorr release s
 
 ## The Problem
 
-1. **The PGP / GnuPG Trap**: OpenPGP relies on fragile background daemons (`gpg-agent`, `dirmngr`), bloated codebases, and vulnerable keyservers (SKS / MIT). As seen in the September 2026 Liquid Network 4,000 BTC incident, attempting to communicate across blockchain and PGP key worlds creates identity confusion and operational failure.
+1. **The PGP / GnuPG Trap**: OpenPGP relies on fragile background daemons (`gpg-agent`, `dirmngr`), bloated legacy codebases, and vulnerable keyservers (SKS / MIT). As seen in the September 2026 Liquid Network 4,000 BTC incident, attempting to communicate across blockchain and PGP key worlds creates operational friction and critical communication delays.
 2. **The Root Key Catastrophe**: As observed by cryptographer Constant regarding Nostr identity compromise:
    > *"If you leak the root key, all you can do is cry."*
    Relying on daily operational use of master root seeds exposes sovereign wealth to malware and physical compromise.
-3. **The NIP-44 Ceiling**: Nostr's native payload encryption (NIP-44) is capped at 64 KiB. It cannot handle multi-gigabyte ISOs, software release archives, or continuous standard I/O UNIX pipelines.
+3. **The NIP-44 Ceiling**: Nostr's native payload encryption (NIP-44) is hard-capped at 64 KiB. It cannot handle multi-gigabyte ISOs, software release archives, or continuous standard I/O UNIX pipelines.
+
+---
+
+## Prior Art & Architectural Novelty
+
+While mature cryptographic primitives exist, the ecosystem has remained fragmented:
+
+* **`age` (X25519)**: Excellent modern file encryption, but strictly tied to Curve25519. It has zero native support for Bitcoin/Nostr (`secp256k1`), zero BIP-85 deterministic key derivation, and cannot leverage hardware cold storage wallets.
+* **Nostr Git Tooling (`ngit` / NIP-34)**: Wraps Git commits into Nostr network event JSON blobs pushed over WebSockets to relays. It does not provide a local, daemonless UNIX stream filter or drop-in standard Git porcelain signing (`git commit -S`) on sovereign offline workstations.
+* **`pipek1` Synthesis**: The first tool to combine **BIP-85 cold-derived `secp256k1` operational keys**, **Rogaway STREAM-ChaCha20-Poly1305** multi-gigabyte authenticated framing, and **zero-daemon Git/UNIX pipelines** into a single, auditable binary.
 
 ---
 
 ## The `pipek1` Architecture
+
 
 * **Zero Daemons**: Pure stateless filter (`cat data | pipek1 [sign|verify|encrypt|decrypt] > out`). Zero background sockets, zero keyrings.
 * **Bounded RAM Invariant**: Strictly bounded resident memory ($\le 16\text{ MiB}$) on arbitrary gigabyte/terabyte streams.

@@ -47,8 +47,8 @@ type HmacSha256 = Hmac<Sha256>;
 pub fn tagged_hash(tag: &str, msg: &[u8]) -> [u8; 32] {
     let tag_hash = Sha256::digest(tag.as_bytes());
     let mut hasher = Sha256::new();
-    hasher.update(&tag_hash);
-    hasher.update(&tag_hash);
+    hasher.update(tag_hash);
+    hasher.update(tag_hash);
     hasher.update(msg);
     let result = hasher.finalize();
     let mut out = [0u8; 32];
@@ -103,7 +103,7 @@ pub fn derive_bip85_operational_key(
         .map_err(|e| format!("Invalid BIP-39 mnemonic: {}", e))?;
     let seed = mnemonic.to_seed(passphrase_str.trim());
 
-    let root_xprv = XPrv::new(&seed)
+    let root_xprv = XPrv::new(seed)
         .map_err(|e| format!("BIP-32 root key derivation failed: {}", e))?;
 
     // BIP-85 path: m/83696968'/128002'/<identity>'/<index>'
@@ -367,7 +367,7 @@ pub fn ecdh_shared_x(priv_scalar: &[u8; 32], pub_x: &[u8; 32]) -> Result<[u8; 32
     let x = enc.x().ok_or("Missing x coordinate")?;
     let mut out = [0u8; 32];
     out.copy_from_slice(x);
-    Ok(Sha256::digest(&out).into())
+    Ok(Sha256::digest(out).into())
 }
 
 /// Streaming Encryptor Implementation
@@ -629,7 +629,7 @@ pub fn run_decrypt(expected_sender: Option<String>, allow_untrusted_sender: bool
         let aad = build_aad(MAGIC_HEADER, 0x01, mode, &recip_pub, chunk_len as u32, chunk_counter, term_tag);
 
         let tag = Tag::from_slice(&tag_bytes);
-        if let Err(_) = cipher.decrypt_in_place_detached(&nonce_bytes.into(), &aad, &mut ct_buffer, tag) {
+        if cipher.decrypt_in_place_detached(&nonce_bytes.into(), &aad, &mut ct_buffer, tag).is_err() {
             eprintln!("Error: Poly1305 AEAD tag verification failed (tampered chunk)");
             std::process::exit(1);
         }
@@ -974,7 +974,7 @@ pub fn run_git_shim(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             write_status_fd(Some(fd_num), &format!("[GNUPG:] SIG_CREATED D 1 8 00 {} {}\n", now, hex_pk));
         }
 
-        let b64_sig = base64::engine::general_purpose::STANDARD.encode(&sig_payload);
+        let b64_sig = base64::engine::general_purpose::STANDARD.encode(sig_payload);
         println!("-----BEGIN PGP SIGNATURE-----");
         println!();
         println!("{}", b64_sig);
@@ -1012,17 +1012,13 @@ fn parse_key_intake_args(args: &[String], start_idx: usize) -> (KeyIntakeArgs, u
                     i += 1;
                 }
             }
-            "--bip85-identity" => {
-                if i + 1 < args.len() {
-                    key_args.bip85_identity = args[i + 1].parse().ok();
-                    i += 1;
-                }
+            "--bip85-identity" if i + 1 < args.len() => {
+                key_args.bip85_identity = args[i + 1].parse().ok();
+                i += 1;
             }
-            "--bip85-index" => {
-                if i + 1 < args.len() {
-                    key_args.bip85_index = args[i + 1].parse().ok();
-                    i += 1;
-                }
+            "--bip85-index" if i + 1 < args.len() => {
+                key_args.bip85_index = args[i + 1].parse().ok();
+                i += 1;
             }
             _ => {}
         }
@@ -1078,11 +1074,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             i += 1;
                         }
                     }
-                    "--entropy-fd" => {
-                        if i + 1 < args.len() {
-                            entropy_fd = args[i + 1].parse().ok();
-                            i += 1;
-                        }
+                    "--entropy-fd" if i + 1 < args.len() => {
+                        entropy_fd = args[i + 1].parse().ok();
+                        i += 1;
                     }
                     _ => {}
                 }

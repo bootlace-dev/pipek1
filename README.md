@@ -2,7 +2,7 @@
 
 A minimal, daemon-less UNIX stream filter implementing BIP-340 Schnorr release signing, Git commit verification, and authenticated stream encryption using Bitcoin and Nostr (`secp256k1`) keypairs.
 
-> **Status:** Draft Specification (v1.9) & Reference Implementation (Phase 1: BIP-340 Schnorr signing, verification, and Git commit plumbing live; Phase 2: Full streaming ChaCha20-Poly1305 engine in active development). Open for peer review, testing, and adversarial critique. Do not use for high-value production secrets without independent verification.
+> **Status:** Draft Specification (v1.9) & Complete Reference Implementation (Phase 1: BIP-340 Schnorr signing, verification, and Git commit plumbing; Phase 2: Full streaming ChaCha20-Poly1305 AEAD filter live). Open for peer review, testing, and adversarial critique. Do not use for high-value production secrets without independent verification.
 
 ---
 

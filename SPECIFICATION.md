@@ -83,7 +83,7 @@ Version: pipek1-v1
 
 ### 2.2 STREAM-ChaCha20-Poly1305 Encryption Framing
 
-#### 2.2.1 Binary Wire Header (Total: 118 Bytes Fixed)
+#### 2.2.1 Binary Wire Header (Total: 97 Bytes Fixed)
 ```text
 +---------------+---------------+---------------+--------------------+
 | Magic (4B)    | Version (1B)  | Mode (1B)     | Ephemeral Pub (32B)|
@@ -91,7 +91,7 @@ Version: pipek1-v1
 +---------------+---------------+---------------+--------------------+
 | Recipient Pubkey (32B, x-only)                                     |
 +-----------------------------------------------+--------------------+
-| Salt (32B, CSPRNG 256-bit entropy)                                 |
+| Salt (11B, CSPRNG multi-target entropy)                                 |
 +-----------------------------------------------+--------------------+
 | Header HMAC (16B)                             |
 +-----------------------------------------------+
@@ -103,8 +103,8 @@ Version: pipek1-v1
   * `0x02` = **Anonymous Mode** (Zero sender identity; pure forward-secret ephemeral encryption).
 * **Byte 6..37 (32B):** Ephemeral Public Key ($E_{pub}$, x-only).
 * **Byte 38..69 (32B):** Recipient Public Key ($R_{pub}$, x-only).
-* **Byte 70..101 (32B):** Salt (32 bytes CSPRNG entropy; full 256-bit multi-target collision resistance).
-* **Byte 102..117 (16B):** Header HMAC: First 16 bytes (indices `0..15`) of $\text{HMAC-SHA256}(\text{HeaderKey}, \text{Header}[0..101])$.
+* **Byte 70..80 (11B):** Salt (11 bytes CSPRNG entropy).
+* **Byte 81..96 (16B):** Header HMAC: First 16 bytes (indices `0..15`) of $\text{HMAC-SHA256}(\text{HeaderKey}, \text{Header}[0..80])$.
 
 #### 2.2.2 Key Schedule & KDF Pipeline
 
@@ -116,10 +116,10 @@ Version: pipek1-v1
 5. $\text{RootKey} (32\text{B}) = \text{HKDF-Extract}(\text{salt} = \text{Header.Salt}, \text{IKM} = \text{IKM})$.
 6. $\text{HeaderKey} (32\text{B}) = \text{HKDF-Expand}(\text{RootKey}, \text{info} = \text{"pipek1/v1/header"}, L = 32)$.
 7. $\text{PayloadKey} (32\text{B}) = \text{HKDF-Expand}(\text{RootKey}, \text{info} = \text{"pipek1/v1/stream"}, L = 32)$.
-8. Compute $\text{HeaderHMAC}[16\text{B}] = \text{HMAC-SHA256}(\text{HeaderKey}, \text{Header}[0..101])[0..15]$.
+8. Compute $\text{HeaderHMAC}[16\text{B}] = \text{HMAC-SHA256}(\text{HeaderKey}, \text{Header}[0..80])[0..15]$.
 
 ##### Recipient Derivation & Verification (Decryption):
-1. Parse 118-byte header from wire. Check magic `PK01`, version `0x01`, and mode $\in \{0x01, 0x02\}$. If header is malformed, abort with exit code `1`.
+1. Parse 97-byte header from wire. Check magic `PK01`, version `0x01`, and mode $\in \{0x01, 0x02\}$. If header is malformed, abort with exit code `1`.
 2. Validate $E_{pub}$ from wire via $\text{lift\_x}(E_{pub})$; if invalid curve point, abort with exit code `1` (wire corruption / tampering).
 3. Assert that $R_{pub}$ in header matches recipient's known public key: $\text{point\_x}(R_{priv} \cdot G) == \text{Header.}R_{pub}$. Abort with exit code `1` if mismatched.
 4. $\text{SharedPoint} = \text{point\_mul}(R_{priv}, \text{lift\_x}(E_{pub}))$. Abort with exit code `1` if point is $\mathcal{O}$.
@@ -127,8 +127,9 @@ Version: pipek1-v1
 6. $\text{RootKey} (32\text{B}) = \text{HKDF-Extract}(\text{salt} = \text{Header.Salt}, \text{IKM} = \text{IKM})$.
 7. $\text{HeaderKey} (32\text{B}) = \text{HKDF-Expand}(\text{RootKey}, \text{info} = \text{"pipek1/v1/header"}, L = 32)$.
 8. $\text{PayloadKey} (32\text{B}) = \text{HKDF-Expand}(\text{RootKey}, \text{info} = \text{"pipek1/v1/stream"}, L = 32)$.
-9. **Mandatory Header HMAC Check:** Compute $\text{ExpectedHMAC} = \text{HMAC-SHA256}(\text{HeaderKey}, \text{Header}[0..101])[0..15]$.
-10. Execute constant-time comparison $\text{ExpectedHMAC} == \text{Header}[102..117]$. If verification fails, **abort immediately with exit code `1`** before processing any stream chunks.
+9. **Mandatory Header HMAC Check:** Compute $\text{ExpectedHMAC} = \text{HMAC-SHA256}(\text{HeaderKey}, \text{Header}[0..80])[0..15]$.
+10. Execute constant-time comparison $\text{ExpectedHMAC} == \text{Header}[81..96]$. If verification fails, **abort immediately with exit code `1`** before processing any stream chunks.
+
 
 #### 2.2.3 Payload Chunk Framing & Explicit Wire Terminal Tag
 Plaintext is processed in chunks up to $65,536\text{ bytes}$ ($64\text{ KiB}$).

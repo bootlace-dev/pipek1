@@ -1,16 +1,16 @@
 [package]
-license = "MIT"
 name = "pipek1"
 version = "0.1.0"
 edition = "2021"
 authors = ["bootlace-dev <bootlace-dev@users.noreply.github.com>"]
 description = "Pure stateless UNIX stream filter for BIP-340 Schnorr release signing and authenticated secp256k1 encryption"
-license = "Apache-2.0"
+license = "MIT"
 
 [dependencies]
 sha2 = "0.10"
 hex = "0.4"
 hmac = "0.12"
+hkdf = "0.12"
 chacha20poly1305 = "0.10"
 k256 = { version = "0.13", features = ["schnorr", "ecdsa", "ecdh", "arithmetic"] }
 rand = "0.8"

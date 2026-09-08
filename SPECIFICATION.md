@@ -109,7 +109,13 @@ Version: pipek1-v1
 #### 2.2.2 Key Schedule & KDF Pipeline
 
 ##### Sender Derivation (Encryption):
-1. Sender generates ephemeral keypair $(E_{priv}, E_{pub})$ where $E_{pub} = \text{point\_x}(E_{priv} \cdot G)$. If the $Y$-coordinate of $E_{priv} \cdot G$ is odd, $E_{priv} = n - E_{priv}$.
+1. **Entropy Hedging & Ephemeral Key Generation:**
+   * Host CSPRNG generates 32 bytes of kernel entropy: $E_{os} \leftarrow \text{getrandom}(32)$.
+   * **Optional Physical Entropy Hedging (`--entropy-fd <N>`):** If an external physical entropy source (e.g. dice/coin flips, airgapped hardware TRNG) is supplied via file descriptor $N$, read arbitrary raw entropy bytes $H_{phys}$. Ephemeral private scalar is derived as:
+     $$E_{priv} = \text{TaggedHash}(\text{"pipek1/v1/entropy"}, E_{os} \parallel H_{phys})$$
+     If $E_{priv} = 0$ or $E_{priv} \ge n$, re-hash iteratively: $E_{priv} = \text{TaggedHash}(\text{"pipek1/v1/entropy"}, E_{priv})$.
+   * If no external entropy is provided, $E_{priv} = E_{os}$.
+   * Ephemeral public point: $E_{pub} = \text{point\_x}(E_{priv} \cdot G)$. If the $Y$-coordinate of $E_{priv} \cdot G$ is odd, $E_{priv} = n - E_{priv}$.
 2. Validate $R_{pub}$ via $\text{lift\_x}(R_{pub})$; abort with exit code `2` if invalid local input.
 3. $\text{SharedPoint} = \text{point\_mul}(E_{priv}, \text{lift\_x}(R_{pub}))$. Abort if point is $\mathcal{O}$.
 4. $\text{IKM} = \text{SHA-256}(\text{point\_x}(\text{SharedPoint}))$.
@@ -390,4 +396,5 @@ Git invokes `pipek1-git-shim` with standard OpenPGP flags. Cosmetic or GnuPG-spe
 | **Git Status Parser Deadlock**| Strict `\n` Line Framing | Every status-FD line explicitly terminated with `\n` (`0x0A`). |
 | **Bare Key Trustfile Display Bug**| Npub Identity Fallback | Emits `<npub>` when trust entry identity is empty, preventing `Good signature from ""` bug. |
 | **Git Foreign Sig Porcelain Crash**| ERRSIG Fallback Protocol | Emits standard `ERRSIG` on status-FD for non-pipek1/malformed packets; exits `1`. |
+| **Compromised Hardware TRNG** | Hybrid Entropy Hedging (`--entropy-fd`)| Mixes $E_{os} \parallel H_{phys}$ via $\text{TaggedHash}(\text{"pipek1/v1/entropy"}, \cdot)$; signing uses deterministic RFC 6979/BIP-340. |
 | **Memory Scrape Post-Exit** | `mlock` + `ZeroizeOnDrop` | Secret keys and intermediate scalars wiped from physical RAM. |

@@ -33,8 +33,26 @@ While mature cryptographic primitives exist, the ecosystem has remained fragment
 * **Bounded RAM Invariant**: Strictly bounded resident memory ($\le 16\text{ MiB}$) on arbitrary gigabyte/terabyte streams.
 * **Zero Release of Unverified Plaintext (RUP)**: Spool-and-verify engine buffers data in RAM and anonymous encrypted temporary disk space (`O_TMPFILE`), aborting with exit code `1` and instant cryptographic erasure on any unauthenticated byte.
 * **BIP-85 Subroot Isolation**: Operational keys are derived via BIP-85 Application `128002'` from cold storage. If an operational key leaks, the master root remains untouched—no catastrophe, no crying.
+* **Hybrid Entropy Hedging (`--entropy-fd`)**: Protects against backdoored CPU TRNGs (`RDRAND`/`RDSEED`) and VM snapshot clone collisions by mixing kernel entropy with physical coin/dice entropy. Digital signing is 100% deterministic (RFC 6979/BIP-340 synthetic nonces) and mathematically immune to broken hardware RNGs.
 
 ---
+
+## Entropy & Hardware RNG Threat Model
+
+Understanding the cryptographic blast radius of host and CPU hardware RNGs:
+
+| Primitive | RNG Dependency | Blast Radius of Backdoored / Broken TRNG | Sovereign Mitigation |
+| :--- | :--- | :--- | :--- |
+| **`pipek1 sign` / Mode 1 Trailer** | **Zero RNG** | **Zero Impact**. BIP-340 generates synthetic nonces deterministically from $sk \parallel \text{msg}$ via HMAC-SHA256. Secret keys cannot leak. | Built-in mathematical immunity. |
+| **BIP-85 Child Derivation** | **Zero RNG** | **Zero Impact**. Pure deterministic derivation from seed mnemonic. | Built-in mathematical immunity. |
+| **`pipek1 encrypt` ($E_{priv}$)** | `getrandom(2)` | **In-Flight Ciphertext Exposure**. An attacker predicting $E_{priv}$ can derive $IKM = \text{ECDH}(E_{priv}, R_{pub})$ and decrypt that specific stream. **Root keys and recipient private keys are NEVER exposed**. | Supply `--entropy-fd <N>` to mix physical dice/coin entropy into $E_{priv}$ via tagged hash. |
+
+### Example: Physical Entropy Hedging in Pipelines
+
+```bash
+# Mix 100 physical coin flips (or dice rolls) with host CSPRNG into ephemeral stream key:
+echo "Classified message" | pipek1 encrypt --recipient "$NPUB" --entropy-fd 3 3<<<"HHTTHTHH...TTHT" > payload.pk
+```
 
 ## Quickstart & Verification
 

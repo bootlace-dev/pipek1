@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256, Sha512};
 use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 type HmacSha512 = Hmac<Sha512>;
@@ -35,6 +35,7 @@ pub const TRAILER_SIZE: usize = 96;  // SenderPubkey (32B) + Signature (64B)
 
 pub const TAG_SIGN: &str = "pipek1/v1/sign";
 pub const TAG_AUTH: &str = "pipek1/v1/auth";
+pub const TAG_ENTROPY: &str = "pipek1/v1/entropy";
 pub const INFO_HEADER: &[u8] = b"pipek1/v1/header";
 pub const INFO_STREAM: &[u8] = b"pipek1/v1/stream";
 
@@ -340,12 +341,47 @@ pub fn ecdh_shared_x(priv_scalar: &[u8; 32], pub_x: &[u8; 32]) -> Result<[u8; 32
 }
 
 /// Streaming Encryptor Implementation
-pub fn run_encrypt(recipient_hex: &str, mode: u8, key_args: &KeyIntakeArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_encrypt(recipient_hex: &str, mode: u8, key_args: &KeyIntakeArgs, entropy_fd: Option<i32>) -> Result<(), Box<dyn std::error::Error>> {
     let recip_x = parse_key_bytes(recipient_hex)?;
     
     // 1. Generate ephemeral keypair (E_priv, E_pub)
-    let mut eph_priv_bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut eph_priv_bytes);
+    // Hybrid Entropy Hedging: OsRng (32B) + optional Physical Entropy (via FD)
+    let mut os_entropy = [0u8; 32];
+    OsRng.fill_bytes(&mut os_entropy);
+
+    let eph_priv_bytes = if let Some(fd_num) = entropy_fd {
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::FromRawFd;
+            let mut f = unsafe { fs::File::from_raw_fd(fd_num) };
+            let mut physical_entropy = Vec::new();
+            f.read_to_end(&mut physical_entropy)?;
+            drop(f); // explicitly close FD immediately
+
+            if physical_entropy.is_empty() {
+                return Err("Entropy file descriptor was empty".into());
+            }
+
+            // TaggedHash("pipek1/v1/entropy", OsRng || PhysicalEntropy)
+            let mut hedge_input = Vec::with_capacity(32 + physical_entropy.len());
+            hedge_input.extend_from_slice(&os_entropy);
+            hedge_input.extend_from_slice(&physical_entropy);
+            let mut mixed = tagged_hash(TAG_ENTROPY, &hedge_input);
+
+            // Re-hash if scalar is zero or >= curve order
+            while SigningKey::from_bytes(&mixed).is_err() || mixed == [0u8; 32] {
+                mixed = tagged_hash(TAG_ENTROPY, &mixed);
+            }
+            mixed
+        }
+        #[cfg(not(unix))]
+        {
+            os_entropy
+        }
+    } else {
+        os_entropy
+    };
+
     let signing_key = SigningKey::from_bytes(&eph_priv_bytes)?;
     let eph_pub_x: [u8; 32] = signing_key.verifying_key().to_bytes().into();
 
@@ -912,14 +948,14 @@ fn parse_key_intake_args(args: &[String], start_idx: usize) -> (KeyIntakeArgs, u
 fn print_usage() {
     eprintln!("pipek1 v0.1.0 - Stateless secp256k1 UNIX cryptographic stream filter");
     eprintln!("Usage:");
-    eprintln!("  pipek1 encrypt --recipient <npub|hex>  # Authenticated stream encryption to stdout");
-    eprintln!("  pipek1 decrypt                         # Spool-and-verify stream decryption to stdout");
-    eprintln!("  pipek1 sign                            # Sign stdin stream using PIPEK1_SEC_KEY env");
-    eprintln!("  pipek1 verify --sig <file>             # Verify stdin stream against signature file");
-    eprintln!("  pipek1 pubkey                          # Display public key and npub from PIPEK1_SEC_KEY");
-    eprintln!("  pipek1 hash [tag]                      # Compute BIP-340 tagged hash over stdin");
-    eprintln!("  pipek1 inspect-header                  # Parse 97-byte wire header from stdin");
-    eprintln!("  pipek1 inspect-chunk                   # Parse 5-byte chunk framing header from stdin");
+    eprintln!("  pipek1 encrypt --recipient <npub|hex> [--entropy-fd <N>]  # Authenticated stream encryption");
+    eprintln!("  pipek1 decrypt                                           # Spool-and-verify stream decryption");
+    eprintln!("  pipek1 sign                                              # Sign stdin stream using PIPEK1_SEC_KEY env");
+    eprintln!("  pipek1 verify --sig <file> [--pub <npub|hex>]            # Verify stdin stream against signature file");
+    eprintln!("  pipek1 pubkey                                            # Display public key and npub from PIPEK1_SEC_KEY");
+    eprintln!("  pipek1 hash [tag]                                        # Compute BIP-340 tagged hash over stdin");
+    eprintln!("  pipek1 inspect-header                                    # Parse 97-byte wire header from stdin");
+    eprintln!("  pipek1 inspect-chunk                                     # Parse 5-byte chunk framing header from stdin");
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -939,6 +975,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "encrypt" => {
             let mut recipient = None;
             let mut mode = 0x02; // Default anonymous mode
+            let mut entropy_fd = None;
             let (key_args, _) = parse_key_intake_args(&args, 2);
             let mut i = 2;
             while i < args.len() {
@@ -955,12 +992,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             i += 1;
                         }
                     }
+                    "--entropy-fd" => {
+                        if i + 1 < args.len() {
+                            entropy_fd = args[i + 1].parse().ok();
+                            i += 1;
+                        }
+                    }
                     _ => {}
                 }
                 i += 1;
             }
             let recip = recipient.ok_or("Missing mandatory argument: --recipient <npub|hex>")?;
-            run_encrypt(&recip, mode, &key_args)?;
+            run_encrypt(&recip, mode, &key_args, entropy_fd)?;
             Ok(())
         }
         "decrypt" => {

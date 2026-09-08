@@ -15,12 +15,14 @@ use k256::elliptic_curve::sec1::ToEncodedPoint;
 use k256::schnorr::{Signature, SigningKey, VerifyingKey};
 use k256::{AffinePoint, PublicKey};
 use rand::{rngs::OsRng, RngCore};
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha512};
 use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+type HmacSha512 = Hmac<Sha512>;
 
 pub const MAGIC_HEADER: &[u8; 4] = b"PK01";
 pub const MAGIC_SIGNATURE: &[u8; 4] = b"PKSG";
@@ -73,15 +75,78 @@ pub fn parse_key_bytes(input: &str) -> Result<[u8; 32], String> {
     }
 }
 
-/// Resolves secret key from CLI flags (--sec-fd, --sec-file) or PIPEK1_SEC_KEY env
-pub fn load_secret_key(sec_fd: Option<i32>, sec_file: Option<&str>) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+#[derive(Default, Clone, Debug)]
+pub struct KeyIntakeArgs {
+    pub sec_fd: Option<i32>,
+    pub sec_file: Option<String>,
+    pub mnemonic_fd: Option<i32>,
+    pub passphrase_fd: Option<i32>,
+    pub bip85_identity: Option<u32>,
+    pub bip85_index: Option<u32>,
+}
+
+/// Computes BIP-85 Application 128002' operational secp256k1 child key from BIP-39 mnemonic
+pub fn derive_bip85_operational_key(
+    mnemonic_str: &str,
+    passphrase_str: &str,
+    identity: u32,
+    index: u32,
+) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+    use bip32::{DerivationPath, XPrv};
+    use bip39::Mnemonic;
+    use std::str::FromStr;
+
+    let mnemonic = Mnemonic::from_str(mnemonic_str.trim())
+        .map_err(|e| format!("Invalid BIP-39 mnemonic: {}", e))?;
+    let seed = mnemonic.to_seed(passphrase_str.trim());
+
+    let root_xprv = XPrv::new(&seed)
+        .map_err(|e| format!("BIP-32 root key derivation failed: {}", e))?;
+
+    // BIP-85 path: m/83696968'/128002'/<identity>'/<index>'
+    let path_str = format!("m/83696968'/128002'/{}'/{}'", identity, index);
+    let path = DerivationPath::from_str(&path_str)
+        .map_err(|e| format!("Invalid BIP-85 derivation path '{}': {}", path_str, e))?;
+
+    let mut current_xprv = root_xprv;
+    for child_num in path {
+        current_xprv = current_xprv.derive_child(child_num)
+            .map_err(|e| format!("BIP-85 child derivation failed: {}", e))?;
+    }
+
+    // Extract child private scalar (32 bytes)
+    let child_priv = current_xprv.private_key().to_bytes();
+
+    // BIP-85 HMAC-SHA512 extraction: Key="bip-entropy-from-k", Data=child_priv
+    let mut mac = <HmacSha512 as Mac>::new_from_slice(b"bip-entropy-from-k")
+        .expect("HMAC can take key of any size");
+    mac.update(&child_priv);
+    let hmac_res = mac.finalize().into_bytes();
+
+    // First 32 bytes (256 MSB)
+    let mut operational_sk = [0u8; 32];
+    operational_sk.copy_from_slice(&hmac_res[0..32]);
+
+    // Verify valid non-zero scalar modulo curve order
+    if operational_sk == [0u8; 32] {
+        return Err("Derived BIP-85 scalar is zero".into());
+    }
+    // Attempt parsing as secp256k1 SigningKey to validate boundary
+    SigningKey::from_bytes(&operational_sk)
+        .map_err(|e| format!("Derived BIP-85 scalar invalid on secp256k1: {}", e))?;
+
+    Ok(operational_sk)
+}
+
+/// Resolves secret key from CLI flags (--sec-fd, --sec-file, BIP-85 flags) or PIPEK1_SEC_KEY env
+pub fn load_secret_key(args: &KeyIntakeArgs) -> Result<[u8; 32], Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]
     unsafe {
         // Disable core dumps and ptrace inspection
         libc::prctl(libc::PR_SET_DUMPABLE, 0);
     }
 
-    if let Some(fd_num) = sec_fd {
+    if let Some(fd_num) = args.sec_fd {
         #[cfg(unix)]
         {
             use std::os::unix::io::FromRawFd;
@@ -94,10 +159,55 @@ pub fn load_secret_key(sec_fd: Option<i32>, sec_file: Option<&str>) -> Result<[u
         }
     }
 
-    if let Some(path) = sec_file {
+    if let Some(ref path) = args.sec_file {
         let s = fs::read_to_string(path)?;
         let k = parse_key_bytes(&s)?;
         return Ok(k);
+    }
+
+    // BIP-85 derivation pathway
+    let mnemonic_input = if let Some(m_fd) = args.mnemonic_fd {
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::FromRawFd;
+            let mut f = unsafe { fs::File::from_raw_fd(m_fd) };
+            let mut s = String::new();
+            f.read_to_string(&mut s)?;
+            drop(f);
+            Some(s)
+        }
+        #[cfg(not(unix))]
+        None
+    } else if let Ok(val) = env::var("PIPEK1_MNEMONIC") {
+        env::remove_var("PIPEK1_MNEMONIC");
+        Some(val)
+    } else {
+        None
+    };
+
+    if let Some(m_str) = mnemonic_input {
+        let passphrase_str = if let Some(p_fd) = args.passphrase_fd {
+            #[cfg(unix)]
+            {
+                use std::os::unix::io::FromRawFd;
+                let mut f = unsafe { fs::File::from_raw_fd(p_fd) };
+                let mut s = String::new();
+                f.read_to_string(&mut s)?;
+                drop(f);
+                s
+            }
+            #[cfg(not(unix))]
+            String::new()
+        } else if let Ok(p_val) = env::var("PIPEK1_PASSPHRASE") {
+            env::remove_var("PIPEK1_PASSPHRASE");
+            p_val
+        } else {
+            String::new()
+        };
+
+        let identity = args.bip85_identity.unwrap_or(0);
+        let index = args.bip85_index.unwrap_or(0);
+        return derive_bip85_operational_key(&m_str, &passphrase_str, identity, index);
     }
 
     if let Ok(val) = env::var("PIPEK1_SEC_KEY") {
@@ -106,7 +216,7 @@ pub fn load_secret_key(sec_fd: Option<i32>, sec_file: Option<&str>) -> Result<[u
         return Ok(k);
     }
 
-    Err("No secret key provided: set PIPEK1_SEC_KEY or pass --sec-fd <N> / --sec-file <path>".into())
+    Err("No secret key provided: set PIPEK1_SEC_KEY, pass --sec-fd / --sec-file, or supply --mnemonic-fd / PIPEK1_MNEMONIC for BIP-85".into())
 }
 
 /// Formats a 32-byte public key as Bech32 npub
@@ -230,7 +340,7 @@ pub fn ecdh_shared_x(priv_scalar: &[u8; 32], pub_x: &[u8; 32]) -> Result<[u8; 32
 }
 
 /// Streaming Encryptor Implementation
-pub fn run_encrypt(recipient_hex: &str, mode: u8, sec_fd: Option<i32>, sec_file: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_encrypt(recipient_hex: &str, mode: u8, key_args: &KeyIntakeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let recip_x = parse_key_bytes(recipient_hex)?;
     
     // 1. Generate ephemeral keypair (E_priv, E_pub)
@@ -309,7 +419,7 @@ pub fn run_encrypt(recipient_hex: &str, mode: u8, sec_fd: Option<i32>, sec_file:
 
     // 6. Mode 1 Authenticated Trailer (96 bytes: SenderPubkey [32B] || BIP340-Signature [64B])
     if mode == 0x01 {
-        let sender_priv = load_secret_key(sec_fd, sec_file)
+        let sender_priv = load_secret_key(key_args)
             .map_err(|e| format!("Mode 1 requires sender secret key: {}", e))?;
         let sender_signing_key = SigningKey::from_bytes(&sender_priv)?;
         let sender_pub: [u8; 32] = sender_signing_key.verifying_key().to_bytes().into();
@@ -331,8 +441,8 @@ pub fn run_encrypt(recipient_hex: &str, mode: u8, sec_fd: Option<i32>, sec_file:
 }
 
 /// Streaming Decryptor Implementation (Spool-and-Verify with Zero RUP Invariant)
-pub fn run_decrypt(expected_sender: Option<String>, allow_untrusted_sender: bool, sec_fd: Option<i32>, sec_file: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    let recip_priv = load_secret_key(sec_fd, sec_file)?;
+pub fn run_decrypt(expected_sender: Option<String>, allow_untrusted_sender: bool, key_args: &KeyIntakeArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let recip_priv = load_secret_key(key_args)?;
     let signing_key = SigningKey::from_bytes(&recip_priv)?;
     let expected_recip_pub: [u8; 32] = signing_key.verifying_key().to_bytes().into();
 
@@ -715,9 +825,7 @@ pub fn run_git_shim(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
     } else {
         // Signing protocol (git commit -S)
-        let sk_raw = env::var("PIPEK1_SEC_KEY")
-            .map_err(|_| "Environment variable PIPEK1_SEC_KEY not set")?;
-        let sk_bytes = parse_key_bytes(&sk_raw)?;
+        let sk_bytes = load_secret_key(&KeyIntakeArgs::default())?;
         let signing_key = SigningKey::from_bytes(&sk_bytes)
             .map_err(|e| format!("Invalid secp256k1 secret key: {}", e))?;
         let pk_x = signing_key.verifying_key().to_bytes();
@@ -753,6 +861,54 @@ pub fn run_git_shim(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+fn parse_key_intake_args(args: &[String], start_idx: usize) -> (KeyIntakeArgs, usize) {
+    let mut key_args = KeyIntakeArgs::default();
+    let mut i = start_idx;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--sec-fd" => {
+                if i + 1 < args.len() {
+                    key_args.sec_fd = args[i + 1].parse().ok();
+                    i += 1;
+                }
+            }
+            "--sec-file" => {
+                if i + 1 < args.len() {
+                    key_args.sec_file = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            "--mnemonic-fd" => {
+                if i + 1 < args.len() {
+                    key_args.mnemonic_fd = args[i + 1].parse().ok();
+                    i += 1;
+                }
+            }
+            "--passphrase-fd" => {
+                if i + 1 < args.len() {
+                    key_args.passphrase_fd = args[i + 1].parse().ok();
+                    i += 1;
+                }
+            }
+            "--bip85-identity" => {
+                if i + 1 < args.len() {
+                    key_args.bip85_identity = args[i + 1].parse().ok();
+                    i += 1;
+                }
+            }
+            "--bip85-index" => {
+                if i + 1 < args.len() {
+                    key_args.bip85_index = args[i + 1].parse().ok();
+                    i += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    (key_args, i)
+}
+
 fn print_usage() {
     eprintln!("pipek1 v0.1.0 - Stateless secp256k1 UNIX cryptographic stream filter");
     eprintln!("Usage:");
@@ -783,8 +939,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "encrypt" => {
             let mut recipient = None;
             let mut mode = 0x02; // Default anonymous mode
-            let mut sec_fd = None;
-            let mut sec_file = None;
+            let (key_args, _) = parse_key_intake_args(&args, 2);
             let mut i = 2;
             while i < args.len() {
                 match args[i].as_str() {
@@ -800,31 +955,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             i += 1;
                         }
                     }
-                    "--sec-fd" => {
-                        if i + 1 < args.len() {
-                            sec_fd = args[i + 1].parse().ok();
-                            i += 1;
-                        }
-                    }
-                    "--sec-file" => {
-                        if i + 1 < args.len() {
-                            sec_file = Some(args[i + 1].clone());
-                            i += 1;
-                        }
-                    }
                     _ => {}
                 }
                 i += 1;
             }
             let recip = recipient.ok_or("Missing mandatory argument: --recipient <npub|hex>")?;
-            run_encrypt(&recip, mode, sec_fd, sec_file.as_deref())?;
+            run_encrypt(&recip, mode, &key_args)?;
             Ok(())
         }
         "decrypt" => {
             let mut sender = None;
             let mut allow_untrusted = false;
-            let mut sec_fd = None;
-            let mut sec_file = None;
+            let (key_args, _) = parse_key_intake_args(&args, 2);
             let mut i = 2;
             while i < args.len() {
                 match args[i].as_str() {
@@ -837,48 +979,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "--allow-untrusted-sender" => {
                         allow_untrusted = true;
                     }
-                    "--sec-fd" => {
-                        if i + 1 < args.len() {
-                            sec_fd = args[i + 1].parse().ok();
-                            i += 1;
-                        }
-                    }
-                    "--sec-file" => {
-                        if i + 1 < args.len() {
-                            sec_file = Some(args[i + 1].clone());
-                            i += 1;
-                        }
-                    }
                     _ => {}
                 }
                 i += 1;
             }
-            run_decrypt(sender, allow_untrusted, sec_fd, sec_file.as_deref())?;
+            run_decrypt(sender, allow_untrusted, &key_args)?;
             Ok(())
         }
         "pubkey" => {
-            let mut sec_fd = None;
-            let mut sec_file = None;
-            let mut i = 2;
-            while i < args.len() {
-                match args[i].as_str() {
-                    "--sec-fd" => {
-                        if i + 1 < args.len() {
-                            sec_fd = args[i + 1].parse().ok();
-                            i += 1;
-                        }
-                    }
-                    "--sec-file" => {
-                        if i + 1 < args.len() {
-                            sec_file = Some(args[i + 1].clone());
-                            i += 1;
-                        }
-                    }
-                    _ => {}
-                }
-                i += 1;
-            }
-            let sk_bytes = load_secret_key(sec_fd, sec_file.as_deref())?;
+            let (key_args, _) = parse_key_intake_args(&args, 2);
+            let sk_bytes = load_secret_key(&key_args)?;
             let signing_key = SigningKey::from_bytes(&sk_bytes)
                 .map_err(|e| format!("Invalid secp256k1 secret key: {}", e))?;
             let pk_x = signing_key.verifying_key().to_bytes();
@@ -888,28 +998,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
         "sign" => {
-            let mut sec_fd = None;
-            let mut sec_file = None;
-            let mut i = 2;
-            while i < args.len() {
-                match args[i].as_str() {
-                    "--sec-fd" => {
-                        if i + 1 < args.len() {
-                            sec_fd = args[i + 1].parse().ok();
-                            i += 1;
-                        }
-                    }
-                    "--sec-file" => {
-                        if i + 1 < args.len() {
-                            sec_file = Some(args[i + 1].clone());
-                            i += 1;
-                        }
-                    }
-                    _ => {}
-                }
-                i += 1;
-            }
-            let sk_bytes = load_secret_key(sec_fd, sec_file.as_deref())?;
+            let (key_args, _) = parse_key_intake_args(&args, 2);
+            let sk_bytes = load_secret_key(&key_args)?;
             let signing_key = SigningKey::from_bytes(&sk_bytes)
                 .map_err(|e| format!("Invalid secp256k1 secret key: {}", e))?;
 

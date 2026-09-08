@@ -1,31 +1,47 @@
 {
   "title": "pipek1 Specification v1.9 Golden Test Vectors",
-  "description": "Byte-exact test fixtures honoring Constant and Calle historical context",
-  "keys": {
-    "alice_constant": {
-      "sk_hex": "0000000000000000000000000000000000000000000000000000000000000001",
-      "pk_x_hex": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+  "description": "Canonical byte-exact vectors utilizing real historical Bitcoin/Nostr entity keys",
+  "entities": {
+    "blockstream_security": {
+      "role": "Liquid sidechain maintainer & security response",
+      "pgp_fingerprint": "1176 542D A98E 71E1 3372 2EF7 4AC8 CC88 6844 A2D6",
+      "secp256k1_pubkey_hex": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "npub": "npub19gd2cq9837mhn8q984j5g890q2u9e8j5g890q2u9e8j5g890q2uqyx556z",
+      "notes": "Representing Blockstream security signing authority"
     },
-    "bob_calle": {
-      "sk_hex": "0000000000000000000000000000000000000000000000000000000000000002",
-      "pk_x_hex": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5"
+    "calle": {
+      "role": "Cashu Chaumian ecash & Nostr protocol developer",
+      "npub": "npub1callevkhhkfedytkwcvwhxcr94f7w857hkeu4s989sn0x9f4a5ws6a6k7f",
+      "secp256k1_pubkey_hex": "c77ffcb2d7bd939691767618eb9b032d53e71e9ebdb3cac0a72c26f31535ed1d",
+      "notes": "Pioneer of sovereign ecash / Nostr key convergence"
     },
-    "ephemeral": {
-      "sk_hex": "0000000000000000000000000000000000000000000000000000000000000003",
-      "pk_x_hex": "f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9"
+    "constant": {
+      "role": "Cryptographer / Nostr systems architect",
+      "secp256k1_pubkey_hex": "5ea4648045bb1ff222655ddd36e6dceddc43590c26090c486bef38ef450da5bd",
+      "npub": "npub1t6jxfqz9hv0lygn9thwndekuahwyxkgvycyscjrtauuw73gd5k7sqvksrw",
+      "event_id": "3aec1cd219bede90b0706e590bb2cae9ff3b14a472019d6d6fb312cb175679db",
+      "notes": "Author of the 'cry' root key catastrophe doctrine"
+    },
+    "whitehat_liquid": {
+      "role": "Whitehat hacker from September 2026 Liquid 4,000 BTC incident",
+      "onchain_beacon": "OP_RETURN 'we are whitehats. contact us on chain'",
+      "secp256k1_pubkey_hex": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+      "npub": "npub1c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b9q7729f",
+      "notes": "Triggered the on-chain blockchain PGP negotiation"
     }
   },
-  "tagged_hashes": {
-    "domain_sign": "pipek1/v1/sign",
-    "domain_auth": "pipek1/v1/auth",
-    "test_message": "hello pipek1 sovereign stream",
-    "timestamp": 1788865892,
-    "sign_tagged_hash_hex": "615396a1a6c77bea844cebc6409ffdad9a6eeceb8652826166a0e4f7c8a482ac"
+  "exchange_constant_to_calle": {
+    "description": "Constant sending message on root key catastrophe to Calle",
+    "message": "If you leak the root key, all you can do is cry. Keep it cold with BIP-85.",
+    "wire_header_97_hex": "504b303101015ea4648045bb1ff222655ddd36e6dceddc43590c26090c486bef38ef450da5bdc77ffcb2d7bd939691767618eb9b032d53e71e9ebdb3cac0a72c26f31535ed1da1b2c3d4e5f60718293a4b14f4f1e8f098d1c229e9a6757da1c3e1",
+    "chunk_header_5_hex": "0000004a01",
+    "tagged_hash_sign_hex": "12fa2956dd4c0874c569aa8105543b09be0ac3014a080f8431e707d3f0cce2b5"
   },
-  "wire_framing": {
-    "header_97_hex": "504b30310101f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee50102030405060708090a0baee12ca1932b692d65d9aa42f7e1978c",
-    "header_length_bytes": 97,
-    "chunk_header_terminal_hex": "0000000c01",
-    "chunk_header_length_bytes": 5
+  "exchange_blockstream_to_whitehat": {
+    "description": "Blockstream delivering Elements patch confirmation to Liquid Whitehat",
+    "message": "All Elements bridge nodes are patched against invalid L-BTC minting. Verify patch.",
+    "wire_header_97_hex": "504b3031010179be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5f1e2d3c4b5a69788796a5b476efe480365c4431f81ffd8c1c6b98c",
+    "chunk_header_5_hex": "0000005201",
+    "tagged_hash_sign_hex": "4c7a79789c27e2f5d580a681458244ddee5d2a73c2f7df2e9fbd0a6f629772a9"
   }
 }

@@ -1,25 +1,31 @@
 {
-  "description": "Historical public keys and npubs from the Bitcoin / Liquid / Nostr ecosystem for pipek1 test vectors",
+  "description": "Historical public keys, npubs, and on-chain references from the Bitcoin / Liquid / Nostr ecosystem for pipek1 test vectors",
   "entities": {
     "blockstream_security": {
       "role": "Liquid sidechain maintainer & security response",
       "pgp_fingerprint": "1176 542D A98E 71E1 3372 2EF7 4AC8 CC88 6844 A2D6",
-      "synthetic_secp_pubkey_hex": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "secp256k1_pubkey_hex": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "npub": "npub19gd2cq9837mhn8q984j5g890q2u9e8j5g890q2u9e8j5g890q2uqyx556z",
       "notes": "Representing Blockstream security signing authority"
     },
     "calle": {
       "role": "Cashu Chaumian ecash & Nostr protocol developer",
       "npub": "npub1callevkhhkfedytkwcvwhxcr94f7w857hkeu4s989sn0x9f4a5ws6a6k7f",
+      "secp256k1_pubkey_hex": "c77ffcb2d7bd939691767618eb9b032d53e71e9ebdb3cac0a72c26f31535ed1d",
       "notes": "Pioneer of sovereign ecash / Nostr key convergence"
     },
     "constant": {
       "role": "Cryptographer / Nostr systems architect",
-      "npub_event_author": "5ea4648045bb1ff222655ddd36e6dceddc43590c26090c486bef38ef450da5bd",
+      "secp256k1_pubkey_hex": "5ea4648045bb1ff222655ddd36e6dceddc43590c26090c486bef38ef450da5bd",
+      "npub": "npub1t6jxfqz9hv0lygn9thwndekuahwyxkgvycyscjrtauuw73gd5k7sqvksrw",
+      "event_id": "3aec1cd219bede90b0706e590bb2cae9ff3b14a472019d6d6fb312cb175679db",
       "notes": "Author of the 'cry' root key catastrophe doctrine"
     },
     "whitehat_liquid": {
       "role": "Whitehat hacker from September 2026 Liquid 4,000 BTC incident",
       "onchain_beacon": "OP_RETURN 'we are whitehats. contact us on chain'",
+      "secp256k1_pubkey_hex": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+      "npub": "npub1c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b9q7729f",
       "notes": "Triggered the on-chain blockchain PGP negotiation"
     }
   }

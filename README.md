@@ -60,6 +60,12 @@ echo "Classified message" | pipek1 encrypt --recipient "$NPUB" --entropy-fd 3 3<
 # Run the end-to-end golden test vector suite:
 ./test_demo.sh
 
+# Run the 8-stage adversarial UNIX plumbing & exit-code test suite:
+./test_adversarial.sh
+
+# Run the Rust integration test suite:
+cargo test --manifest-path rust/Cargo.toml --test cli_tests
+
 # Run C-struct binary alignment verifier:
 ./vectors/verify_c
 ```
@@ -74,8 +80,8 @@ echo "Classified message" | pipek1 encrypt --recipient "$NPUB" --entropy-fd 3 3<
 # Compile bit-identical static release binary:
 ./build_reproducible.sh
 
-# Target Binary Size: 971,408 bytes
-# Canonical SHA-256: 1dd498b73e94fa7408fbc80956d61bdc07f6911343cd17585580982bd04fc0b4
+# Target Binary Size: 1,036,912 bytes
+# Canonical SHA-256: 4dc846abc958bcab747bd3a7d6dd3c8f7b4c13046427eba3a6deb47941bef153
 ```
 
 ---

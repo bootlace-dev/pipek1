@@ -4,6 +4,7 @@
 //! pipek1: Pure Stateless UNIX Cryptographic Filter (Specification v1.9)
 //! Anonymous / Zero-PII Invariant: bootlace-dev <bootlace-dev@users.noreply.github.com>
 
+use base64::Engine as _;
 use bech32::{Bech32, Hrp};
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Tag};
@@ -16,7 +17,9 @@ use k256::{AffinePoint, PublicKey};
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use std::env;
+use std::fs;
 use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const MAGIC_HEADER: &[u8; 4] = b"PK01";
@@ -26,6 +29,7 @@ pub const CHUNK_HEADER_SIZE: usize = 5;
 pub const SIGNATURE_PAYLOAD_SIZE: usize = 105;
 pub const CHUNK_SIZE: usize = 65536; // 64 KiB
 pub const TAG_SIZE: usize = 16;      // Poly1305 16 bytes
+pub const TRAILER_SIZE: usize = 96;  // SenderPubkey (32B) + Signature (64B)
 
 pub const TAG_SIGN: &str = "pipek1/v1/sign";
 pub const TAG_AUTH: &str = "pipek1/v1/auth";
@@ -67,6 +71,42 @@ pub fn parse_key_bytes(input: &str) -> Result<[u8; 32], String> {
         out.copy_from_slice(&hex_bytes);
         Ok(out)
     }
+}
+
+/// Resolves secret key from CLI flags (--sec-fd, --sec-file) or PIPEK1_SEC_KEY env
+pub fn load_secret_key(sec_fd: Option<i32>, sec_file: Option<&str>) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        // Disable core dumps and ptrace inspection
+        libc::prctl(libc::PR_SET_DUMPABLE, 0);
+    }
+
+    if let Some(fd_num) = sec_fd {
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::FromRawFd;
+            let mut f = unsafe { fs::File::from_raw_fd(fd_num) };
+            let mut s = String::new();
+            f.read_to_string(&mut s)?;
+            drop(f); // explicitly close fd immediately
+            let k = parse_key_bytes(&s)?;
+            return Ok(k);
+        }
+    }
+
+    if let Some(path) = sec_file {
+        let s = fs::read_to_string(path)?;
+        let k = parse_key_bytes(&s)?;
+        return Ok(k);
+    }
+
+    if let Ok(val) = env::var("PIPEK1_SEC_KEY") {
+        let k = parse_key_bytes(&val)?;
+        env::remove_var("PIPEK1_SEC_KEY"); // Scrub process environment
+        return Ok(k);
+    }
+
+    Err("No secret key provided: set PIPEK1_SEC_KEY or pass --sec-fd <N> / --sec-file <path>".into())
 }
 
 /// Formats a 32-byte public key as Bech32 npub
@@ -190,7 +230,7 @@ pub fn ecdh_shared_x(priv_scalar: &[u8; 32], pub_x: &[u8; 32]) -> Result<[u8; 32
 }
 
 /// Streaming Encryptor Implementation
-pub fn run_encrypt(recipient_hex: &str, mode: u8) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_encrypt(recipient_hex: &str, mode: u8, sec_fd: Option<i32>, sec_file: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     let recip_x = parse_key_bytes(recipient_hex)?;
     
     // 1. Generate ephemeral keypair (E_priv, E_pub)
@@ -231,6 +271,7 @@ pub fn run_encrypt(recipient_hex: &str, mode: u8) -> Result<(), Box<dyn std::err
     let mut next_buf = vec![0u8; CHUNK_SIZE];
 
     let mut cur_len = stdin.read(&mut cur_buf)?;
+    let mut plaintext_hasher = Sha256::new();
 
     loop {
         let next_len = stdin.read(&mut next_buf)?;
@@ -244,6 +285,10 @@ pub fn run_encrypt(recipient_hex: &str, mode: u8) -> Result<(), Box<dyn std::err
         chunk_header[0..4].copy_from_slice(&chunk_len.to_be_bytes());
         chunk_header[4] = term_tag;
         stdout.write_all(&chunk_header)?;
+
+        if mode == 0x01 {
+            plaintext_hasher.update(&cur_buf[0..cur_len]);
+        }
 
         let mut block = cur_buf[0..cur_len].to_vec();
         let tag = cipher.encrypt_in_place_detached(&nonce_bytes.into(), &aad, &mut block)
@@ -262,15 +307,32 @@ pub fn run_encrypt(recipient_hex: &str, mode: u8) -> Result<(), Box<dyn std::err
         cur_len = next_len;
     }
 
+    // 6. Mode 1 Authenticated Trailer (96 bytes: SenderPubkey [32B] || BIP340-Signature [64B])
+    if mode == 0x01 {
+        let sender_priv = load_secret_key(sec_fd, sec_file)
+            .map_err(|e| format!("Mode 1 requires sender secret key: {}", e))?;
+        let sender_signing_key = SigningKey::from_bytes(&sender_priv)?;
+        let sender_pub: [u8; 32] = sender_signing_key.verifying_key().to_bytes().into();
+
+        let pt_digest = plaintext_hasher.finalize();
+        let mut auth_transcript = [0u8; 48];
+        auth_transcript[0..16].copy_from_slice(&hmac_16);
+        auth_transcript[16..48].copy_from_slice(&pt_digest);
+
+        let auth_hash = tagged_hash(TAG_AUTH, &auth_transcript);
+        let sig = sender_signing_key.sign_raw(&auth_hash, &[0u8; 32]).map_err(|e| format!("Trailer signing failed: {}", e))?;
+
+        stdout.write_all(&sender_pub)?;
+        stdout.write_all(&sig.to_bytes())?;
+    }
+
     stdout.flush()?;
     Ok(())
 }
 
 /// Streaming Decryptor Implementation (Spool-and-Verify with Zero RUP Invariant)
-pub fn run_decrypt() -> Result<(), Box<dyn std::error::Error>> {
-    let sk_raw = env::var("PIPEK1_SEC_KEY")
-        .map_err(|_| "Environment variable PIPEK1_SEC_KEY not set")?;
-    let recip_priv = parse_key_bytes(&sk_raw)?;
+pub fn run_decrypt(expected_sender: Option<String>, allow_untrusted_sender: bool, sec_fd: Option<i32>, sec_file: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let recip_priv = load_secret_key(sec_fd, sec_file)?;
     let signing_key = SigningKey::from_bytes(&recip_priv)?;
     let expected_recip_pub: [u8; 32] = signing_key.verifying_key().to_bytes().into();
 
@@ -292,6 +354,17 @@ pub fn run_decrypt() -> Result<(), Box<dyn std::error::Error>> {
     if mode != 0x01 && mode != 0x02 {
         eprintln!("Error: Unsupported mode: {}", mode);
         std::process::exit(1);
+    }
+
+    // Anti-Bypass Invariant: If --sender is provided and wire header is Mode 0x02 (Anonymous), abort
+    if expected_sender.is_some() && mode == 0x02 {
+        eprintln!("Error: Sender verification requested via --sender, but wire header indicates Mode 2 (Anonymous)");
+        std::process::exit(1);
+    }
+
+    if mode == 0x01 && expected_sender.is_none() && !allow_untrusted_sender {
+        eprintln!("Error: Mode 1 stream requires either --sender <npub|hex> or --allow-untrusted-sender");
+        std::process::exit(2);
     }
 
     let mut eph_pub = [0u8; 32];
@@ -322,6 +395,7 @@ pub fn run_decrypt() -> Result<(), Box<dyn std::error::Error>> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&payload_key));
     let mut chunk_counter: u64 = 0;
     let mut spooled_plaintext: Vec<u8> = Vec::new();
+    let mut plaintext_hasher = Sha256::new();
 
     loop {
         let mut chunk_hdr = [0u8; CHUNK_HEADER_SIZE];
@@ -361,6 +435,10 @@ pub fn run_decrypt() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         }
 
+        if mode == 0x01 {
+            plaintext_hasher.update(&ct_buffer);
+        }
+
         spooled_plaintext.extend_from_slice(&ct_buffer);
         chunk_counter += 1;
 
@@ -369,18 +447,310 @@ pub fn run_decrypt() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 4. Post-stream EOF validation (assert zero unauthenticated trailing bytes)
+    // 4. Mode 1 Authenticated Trailer Verification (96 bytes: SenderPub [32B] || BIP340-Sig [64B])
+    if mode == 0x01 {
+        let mut trailer = [0u8; TRAILER_SIZE];
+        if let Err(e) = stdin.read_exact(&mut trailer) {
+            eprintln!("Error: Missing or truncated Mode 1 authenticated trailer: {}", e);
+            std::process::exit(1);
+        }
+
+        let sender_pub = &trailer[0..32];
+        let sig_bytes = &trailer[32..96];
+
+        let sender_vk = match VerifyingKey::from_bytes(sender_pub) {
+            Ok(k) => k,
+            Err(e) => {
+                eprintln!("Error: Invalid sender public key in trailer: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        let sig = match Signature::try_from(sig_bytes) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Error: Invalid signature framing in trailer: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        let pt_digest = plaintext_hasher.finalize();
+        let mut auth_transcript = [0u8; 48];
+        auth_transcript[0..16].copy_from_slice(&header[81..97]); // header HMAC
+        auth_transcript[16..48].copy_from_slice(&pt_digest);
+
+        let auth_hash = tagged_hash(TAG_AUTH, &auth_transcript);
+
+        if let Err(e) = sender_vk.verify_raw(&auth_hash, &sig) {
+            eprintln!("Error: Mode 1 trailer signature verification failed: {}", e);
+            std::process::exit(1);
+        }
+
+        let sender_npub = encode_npub(sender_pub);
+
+        if let Some(exp) = expected_sender {
+            let exp_bytes = parse_key_bytes(&exp)?;
+            if exp_bytes != sender_pub {
+                eprintln!("Error: Authenticated sender {} does not match expected sender {}", sender_npub, exp);
+                std::process::exit(1);
+            }
+            eprintln!("Notice: Authenticated Mode 1 stream verified from {}", sender_npub);
+        } else if allow_untrusted_sender {
+            eprintln!("Notice: Decrypted Mode 1 stream authenticated by untrusted sender {}", sender_npub);
+        }
+    }
+
+    // 5. Post-stream EOF validation (assert zero unauthenticated trailing bytes)
     let mut trailing = [0u8; 1];
     if stdin.read(&mut trailing)? > 0 {
-        eprintln!("Error: Unauthenticated trailing bytes detected after terminal chunk");
+        eprintln!("Error: Unauthenticated trailing bytes detected after stream termination");
         std::process::exit(1);
     }
 
-    // 5. Release verified plaintext to stdout (Zero RUP Invariant achieved)
+    // 6. Release verified plaintext to stdout (Zero RUP Invariant achieved)
     let mut stdout = io::stdout();
     stdout.write_all(&spooled_plaintext)?;
     stdout.flush()?;
     Ok(())
+}
+
+/// Resolves repository trust database (allowed_signers)
+pub fn resolve_allowed_signers() -> Vec<(String, [u8; 32])> {
+    let mut signers = Vec::new();
+
+    // Check $GIT_DIR/pipek1_signers or .git/pipek1_signers
+    let mut candidate_paths = Vec::new();
+    if let Ok(git_dir) = env::var("GIT_DIR") {
+        candidate_paths.push(PathBuf::from(git_dir).join("pipek1_signers"));
+    }
+    candidate_paths.push(PathBuf::from(".git/pipek1_signers"));
+    if let Ok(home) = env::var("HOME") {
+        candidate_paths.push(PathBuf::from(home).join(".config/pipek1/allowed_signers"));
+    }
+
+    for path in candidate_paths {
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || trimmed.starts_with('#') {
+                        continue;
+                    }
+                    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+                    if tokens.is_empty() {
+                        continue;
+                    }
+                    let key_token = tokens[tokens.len() - 1];
+                    let identity = if tokens.len() > 1 {
+                        tokens[0..tokens.len() - 1].join(" ")
+                    } else {
+                        key_token.to_string()
+                    };
+                    if let Ok(key_bytes) = parse_key_bytes(key_token) {
+                        signers.push((identity, key_bytes));
+                    }
+                }
+                break;
+            }
+        }
+    }
+    signers
+}
+
+fn write_status_fd(status_fd: Option<i32>, line: &str) {
+    if let Some(fd_num) = status_fd {
+        if fd_num == 1 {
+            let mut stdout = io::stdout();
+            let _ = stdout.write_all(line.as_bytes());
+            let _ = stdout.flush();
+            return;
+        } else if fd_num == 2 {
+            let mut stderr = io::stderr();
+            let _ = stderr.write_all(line.as_bytes());
+            let _ = stderr.flush();
+            return;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::FromRawFd;
+            unsafe {
+                let mut f = fs::File::from_raw_fd(fd_num);
+                let _ = f.write_all(line.as_bytes());
+                let _ = f.flush();
+                std::mem::forget(f); // prevent closing inherited fd
+            }
+        }
+    }
+}
+
+/// Git Plumbing Shim Handler
+pub fn run_git_shim(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let mut status_fd: Option<i32> = None;
+    let mut key_id: Option<String> = None;
+    let mut is_verify = false;
+    let mut verify_sig_path: Option<String> = None;
+    let mut verify_data_path: Option<String> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg.starts_with("--status-fd=") {
+            let num = arg.strip_prefix("--status-fd=").unwrap();
+            status_fd = num.parse().ok();
+        } else if arg == "--status-fd" {
+            if i + 1 < args.len() {
+                status_fd = args[i + 1].parse().ok();
+                i += 1;
+            }
+        } else if arg == "--verify" || arg == "-v" {
+            is_verify = true;
+            if i + 1 < args.len() {
+                verify_sig_path = Some(args[i + 1].clone());
+                i += 1;
+            }
+            if i + 1 < args.len() {
+                verify_data_path = Some(args[i + 1].clone());
+                i += 1;
+            }
+        } else if arg == "-u" {
+            if i + 1 < args.len() {
+                key_id = Some(args[i + 1].clone());
+                i += 1;
+            }
+        } else if arg.starts_with("-u") && arg.len() > 2 {
+            key_id = Some(arg[2..].to_string());
+        } else if arg.contains('u') && arg.starts_with('-') && !arg.starts_with("--") {
+            // e.g. -bsau <keyid>
+            if i + 1 < args.len() {
+                key_id = Some(args[i + 1].clone());
+                i += 1;
+            }
+        }
+        i += 1;
+    }
+
+    if is_verify {
+        // Verification protocol
+        let sig_p = verify_sig_path.ok_or("Missing signature path for --verify")?;
+        let data_p = verify_data_path.unwrap_or_else(|| "-".to_string());
+
+        let sig_raw = fs::read(&sig_p).map_err(|e| format!("Cannot read signature: {}", e))?;
+        // Detach ASCII armor if present
+        let sig_bytes = if let Ok(s) = std::str::from_utf8(&sig_raw) {
+            if s.contains("BEGIN PGP SIGNATURE") {
+                let mut b64 = String::new();
+                let mut capture = false;
+                for line in s.lines() {
+                    let tr = line.trim();
+                    if tr.contains("BEGIN PGP SIGNATURE") {
+                        capture = true;
+                        continue;
+                    }
+                    if tr.contains("END PGP SIGNATURE") {
+                        break;
+                    }
+                    if capture && !tr.is_empty() && !tr.contains(':') {
+                        b64.push_str(tr);
+                    }
+                }
+                base64::engine::general_purpose::STANDARD.decode(b64)
+                    .map_err(|e| format!("Base64 decode error: {}", e))?
+            } else {
+                sig_raw
+            }
+        } else {
+            sig_raw
+        };
+
+        if sig_bytes.len() != SIGNATURE_PAYLOAD_SIZE {
+            write_status_fd(status_fd, "[GNUPG:] NEWSIG\n[GNUPG:] ERRSIG 0000000000000000 1 8 00 0000000000 9\n");
+            eprintln!("pipek1-git-shim: error: malformed or unrecognized signature format");
+            std::process::exit(1);
+        }
+
+        let mut sig_payload = [0u8; SIGNATURE_PAYLOAD_SIZE];
+        sig_payload.copy_from_slice(&sig_bytes);
+
+        let data_bytes = if data_p == "-" {
+            let mut buf = Vec::new();
+            io::stdin().read_to_end(&mut buf)?;
+            buf
+        } else {
+            fs::read(&data_p)?
+        };
+
+        let msg_digest: [u8; 32] = Sha256::digest(&data_bytes).into();
+
+        match verify_stream_payload(&sig_payload, &msg_digest) {
+            Ok(signer_pk) => {
+                let hex_pk = hex::encode(signer_pk);
+                let npub = encode_npub(&signer_pk);
+                let timestamp = u32::from_be_bytes(sig_payload[5..9].try_into().unwrap());
+                let date_str = "2026-09-08"; // ISO date string
+
+                let allowed = resolve_allowed_signers();
+                let matched_identity = allowed.iter().find(|(_, k)| *k == signer_pk);
+
+                write_status_fd(status_fd, "[GNUPG:] NEWSIG\n");
+                if let Some((ident, _)) = matched_identity {
+                    write_status_fd(status_fd, &format!("[GNUPG:] GOODSIG {} {}\n", hex_pk, ident));
+                    write_status_fd(status_fd, &format!("[GNUPG:] VALIDSIG {} {} {} 0 4 0 1 8 00 {}\n", hex_pk, date_str, timestamp, hex_pk));
+                    write_status_fd(status_fd, "[GNUPG:] TRUST_ULTIMATE 0 pgp\n");
+                } else {
+                    write_status_fd(status_fd, &format!("[GNUPG:] GOODSIG {} {}\n", hex_pk, npub));
+                    write_status_fd(status_fd, &format!("[GNUPG:] VALIDSIG {} {} {} 0 4 0 1 8 00 {}\n", hex_pk, date_str, timestamp, hex_pk));
+                    write_status_fd(status_fd, "[GNUPG:] TRUST_UNDEFINED 0 pgp\n");
+                }
+                std::process::exit(0);
+            }
+            Err(e) => {
+                let signer_pk = &sig_payload[9..41];
+                let hex_pk = hex::encode(signer_pk);
+                let npub = encode_npub(signer_pk);
+                write_status_fd(status_fd, "[GNUPG:] NEWSIG\n");
+                write_status_fd(status_fd, &format!("[GNUPG:] BADSIG {} {}\n", hex_pk, npub));
+                eprintln!("pipek1-git-shim: signature verification failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        // Signing protocol (git commit -S)
+        let sk_raw = env::var("PIPEK1_SEC_KEY")
+            .map_err(|_| "Environment variable PIPEK1_SEC_KEY not set")?;
+        let sk_bytes = parse_key_bytes(&sk_raw)?;
+        let signing_key = SigningKey::from_bytes(&sk_bytes)
+            .map_err(|e| format!("Invalid secp256k1 secret key: {}", e))?;
+        let pk_x = signing_key.verifying_key().to_bytes();
+        let hex_pk = hex::encode(pk_x);
+
+        if let Some(ref kid) = key_id {
+            if let Ok(exp_bytes) = parse_key_bytes(kid) {
+                if exp_bytes != pk_x.as_slice() {
+                    write_status_fd(status_fd, &format!("[GNUPG:] INV_SGNR 0 {}\n", kid));
+                    eprintln!("pipek1-git-shim: error: signing key {} does not match configured secret key", kid);
+                    std::process::exit(2);
+                }
+            }
+        }
+
+        let mut commit_data = Vec::new();
+        io::stdin().read_to_end(&mut commit_data)?;
+        let msg_digest: [u8; 32] = Sha256::digest(&commit_data).into();
+
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as u32;
+        let sig_payload = sign_stream_payload(&signing_key, &msg_digest, now);
+
+        if let Some(fd_num) = status_fd {
+            write_status_fd(Some(fd_num), &format!("[GNUPG:] SIG_CREATED D 1 8 00 {} {}\n", now, hex_pk));
+        }
+
+        let b64_sig = base64::engine::general_purpose::STANDARD.encode(&sig_payload);
+        println!("-----BEGIN PGP SIGNATURE-----");
+        println!();
+        println!("{}", b64_sig);
+        println!("-----END PGP SIGNATURE-----");
+        std::process::exit(0);
+    }
 }
 
 fn print_usage() {
@@ -403,10 +773,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(2);
     }
 
+    let exe_name = args[0].rsplit('/').next().unwrap_or(&args[0]);
+    if exe_name.contains("git-shim") || args[1] == "git-shim" || args[1].starts_with("-b") || args[1].starts_with("--status-fd") {
+        let shim_args = if args[1] == "git-shim" { &args[2..] } else { &args[1..] };
+        return run_git_shim(shim_args);
+    }
+
     match args[1].as_str() {
         "encrypt" => {
             let mut recipient = None;
             let mut mode = 0x02; // Default anonymous mode
+            let mut sec_fd = None;
+            let mut sec_file = None;
             let mut i = 2;
             while i < args.len() {
                 match args[i].as_str() {
@@ -422,22 +800,85 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             i += 1;
                         }
                     }
+                    "--sec-fd" => {
+                        if i + 1 < args.len() {
+                            sec_fd = args[i + 1].parse().ok();
+                            i += 1;
+                        }
+                    }
+                    "--sec-file" => {
+                        if i + 1 < args.len() {
+                            sec_file = Some(args[i + 1].clone());
+                            i += 1;
+                        }
+                    }
                     _ => {}
                 }
                 i += 1;
             }
             let recip = recipient.ok_or("Missing mandatory argument: --recipient <npub|hex>")?;
-            run_encrypt(&recip, mode)?;
+            run_encrypt(&recip, mode, sec_fd, sec_file.as_deref())?;
             Ok(())
         }
         "decrypt" => {
-            run_decrypt()?;
+            let mut sender = None;
+            let mut allow_untrusted = false;
+            let mut sec_fd = None;
+            let mut sec_file = None;
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--sender" => {
+                        if i + 1 < args.len() {
+                            sender = Some(args[i + 1].clone());
+                            i += 1;
+                        }
+                    }
+                    "--allow-untrusted-sender" => {
+                        allow_untrusted = true;
+                    }
+                    "--sec-fd" => {
+                        if i + 1 < args.len() {
+                            sec_fd = args[i + 1].parse().ok();
+                            i += 1;
+                        }
+                    }
+                    "--sec-file" => {
+                        if i + 1 < args.len() {
+                            sec_file = Some(args[i + 1].clone());
+                            i += 1;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            run_decrypt(sender, allow_untrusted, sec_fd, sec_file.as_deref())?;
             Ok(())
         }
         "pubkey" => {
-            let sk_raw = env::var("PIPEK1_SEC_KEY")
-                .map_err(|_| "Environment variable PIPEK1_SEC_KEY not set")?;
-            let sk_bytes = parse_key_bytes(&sk_raw)?;
+            let mut sec_fd = None;
+            let mut sec_file = None;
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--sec-fd" => {
+                        if i + 1 < args.len() {
+                            sec_fd = args[i + 1].parse().ok();
+                            i += 1;
+                        }
+                    }
+                    "--sec-file" => {
+                        if i + 1 < args.len() {
+                            sec_file = Some(args[i + 1].clone());
+                            i += 1;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            let sk_bytes = load_secret_key(sec_fd, sec_file.as_deref())?;
             let signing_key = SigningKey::from_bytes(&sk_bytes)
                 .map_err(|e| format!("Invalid secp256k1 secret key: {}", e))?;
             let pk_x = signing_key.verifying_key().to_bytes();
@@ -447,9 +888,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
         "sign" => {
-            let sk_raw = env::var("PIPEK1_SEC_KEY")
-                .map_err(|_| "Environment variable PIPEK1_SEC_KEY not set")?;
-            let sk_bytes = parse_key_bytes(&sk_raw)?;
+            let mut sec_fd = None;
+            let mut sec_file = None;
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--sec-fd" => {
+                        if i + 1 < args.len() {
+                            sec_fd = args[i + 1].parse().ok();
+                            i += 1;
+                        }
+                    }
+                    "--sec-file" => {
+                        if i + 1 < args.len() {
+                            sec_file = Some(args[i + 1].clone());
+                            i += 1;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            let sk_bytes = load_secret_key(sec_fd, sec_file.as_deref())?;
             let signing_key = SigningKey::from_bytes(&sk_bytes)
                 .map_err(|e| format!("Invalid secp256k1 secret key: {}", e))?;
 

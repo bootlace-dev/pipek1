@@ -3,3 +3,5 @@ target/
 verify_c
 __pycache__/
 *.pyc
+pipek1
+pipek1-git-shim

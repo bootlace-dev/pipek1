@@ -925,10 +925,14 @@ pub fn run_git_shim(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
                 write_status_fd(status_fd, "[GNUPG:] NEWSIG\n");
                 if let Some((ident, _)) = matched_identity {
+                    eprintln!("gpg: Signature made {} using secp256k1 key {}", date_str, hex_pk);
+                    eprintln!("gpg: Good signature from \"{}\" [ultimate]", ident);
                     write_status_fd(status_fd, &format!("[GNUPG:] GOODSIG {} {}\n", hex_pk, ident));
                     write_status_fd(status_fd, &format!("[GNUPG:] VALIDSIG {} {} {} 0 4 0 1 8 00 {}\n", hex_pk, date_str, timestamp, hex_pk));
                     write_status_fd(status_fd, "[GNUPG:] TRUST_ULTIMATE 0 pgp\n");
                 } else {
+                    eprintln!("gpg: Signature made {} using secp256k1 key {}", date_str, hex_pk);
+                    eprintln!("gpg: Good signature from \"{}\" [unknown]", npub);
                     write_status_fd(status_fd, &format!("[GNUPG:] GOODSIG {} {}\n", hex_pk, npub));
                     write_status_fd(status_fd, &format!("[GNUPG:] VALIDSIG {} {} {} 0 4 0 1 8 00 {}\n", hex_pk, date_str, timestamp, hex_pk));
                     write_status_fd(status_fd, "[GNUPG:] TRUST_UNDEFINED 0 pgp\n");
@@ -1048,7 +1052,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let exe_name = args[0].rsplit('/').next().unwrap_or(&args[0]);
-    if exe_name.contains("git-shim") || args[1] == "git-shim" || args[1].starts_with("-b") || args[1].starts_with("--status-fd") {
+    let is_git_invocation = exe_name.contains("git-shim")
+        || args[1] == "git-shim"
+        || args[1].starts_with("-b")
+        || args[1].starts_with("--status-fd")
+        || args[1].starts_with("--keyid-format")
+        || args[1] == "--verify"
+        || args[1].starts_with("--extra-check-level");
+
+    if is_git_invocation {
         let shim_args = if args[1] == "git-shim" { &args[2..] } else { &args[1..] };
         return run_git_shim(shim_args);
     }

@@ -38,3 +38,10 @@ A minimal, daemon-less UNIX stream filter implementing BIP-340 Schnorr release s
 ## Specification
 
 The complete, asymptotically audited technical specification is locked in [SPECIFICATION.md](SPECIFICATION.md) (v1.9).
+
+---
+
+## Architecture & Autonomous Implementation
+
+This protocol specification, reference Rust implementation, test suites, and cryptographic test vectors were architected under human direction and autonomously coded, audited, and verified using Google Gemini / Antigravity agentic workflows.
+

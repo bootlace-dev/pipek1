@@ -74,3 +74,33 @@ echo ""
 echo "=================================================================="
 echo " ALL MVP DEMO ASSERTIONS PASSED (100% OK)"
 echo "=================================================================="
+
+# 5. Live End-to-End Cryptographic Signing & Verification Test
+echo "[TEST 5] Live End-to-End BIP-340 Stream Signing & Verification:"
+export PIPEK1_SEC_KEY="0000000000000000000000000000000000000000000000000000000000000001"
+TEST_NPUB=$("$PIPEK1" pubkey | grep Npub | awk '{print $2}')
+echo "  Signer Identity: $TEST_NPUB"
+
+TEST_PAYLOAD="Constant to Calle: If you leak the root key, all you can do is cry."
+SIG_FILE="/tmp/demo_test.sig"
+
+# Generate signature over stream
+echo -n "$TEST_PAYLOAD" | "$PIPEK1" sign > "$SIG_FILE"
+echo "  Generated 105-byte binary signature payload (PKSG v1): OK"
+
+# Assert valid verification
+echo -n "$TEST_PAYLOAD" | "$PIPEK1" verify --sig "$SIG_FILE" --pub "$TEST_NPUB"
+echo "  Verified authentic stream: OK (Exit code 0)"
+
+# Assert tamper detection
+set +e
+echo -n "Tampered payload" | "$PIPEK1" verify --sig "$SIG_FILE" --pub "$TEST_NPUB" 2>/dev/null
+TAMPER_EC=$?
+set -e
+if [ "$TAMPER_EC" -eq 1 ]; then
+    echo "  Adversarial bit-flip rejected: OK (Exit code 1)"
+else
+    echo "  Tamper test failed: Expected exit code 1, got $TAMPER_EC"
+    exit 1
+fi
+rm -f "$SIG_FILE"

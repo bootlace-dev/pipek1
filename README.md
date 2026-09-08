@@ -75,7 +75,7 @@ echo "Classified message" | pipek1 encrypt --recipient "$NPUB" --entropy-fd 3 3<
 ./build_reproducible.sh
 
 # Target Binary Size: 963,216 bytes
-# Canonical SHA-256: 21ab97a1075394da367e19f5c4d669efddde28d036c05930285cc92a3cdaf426
+# Canonical SHA-256: 6123661cb911efb124b56251b88ee47ef2a311138f971d5a37c2a5a0a7313d55
 ```
 
 ---

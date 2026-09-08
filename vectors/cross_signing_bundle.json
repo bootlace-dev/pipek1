@@ -1,0 +1,7 @@
+{
+  "bip85_path": "m/83696968'/128002'/0'/0'",
+  "sk_master_hex": "f21a9f3cf36de6adb06e485b2b565ab54d942b967640885f4041984d46538018",
+  "sk_child_hex": "6b7e23dcd7d8266d0b876a9c12070acd8445d72c38df8b4d283bcf8ca746caed",
+  "statement_master_to_child": "ATTESTATION [MASTER -> CHILD]: I, bootlace master identity, authorize child key 0 (BIP-85 m/83696968'/128002'/0'/0') as legitimate pipek1 release signer.",
+  "statement_child_to_master": "ATTESTATION [CHILD -> MASTER]: I, pipek1 child key 0, confirm derivation from bootlace master root under BIP-85 path m/83696968'/128002'/0'/0'."
+}

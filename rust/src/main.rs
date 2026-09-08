@@ -18,6 +18,8 @@ use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256, Sha512};
 use std::env;
 use std::fs;
+use subtle::ConstantTimeEq;
+use zeroize::Zeroize;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -156,13 +158,15 @@ pub fn load_secret_key(args: &KeyIntakeArgs) -> Result<[u8; 32], Box<dyn std::er
             f.read_to_string(&mut s)?;
             drop(f); // explicitly close fd immediately
             let k = parse_key_bytes(&s)?;
+            s.zeroize();
             return Ok(k);
         }
     }
 
     if let Some(ref path) = args.sec_file {
-        let s = fs::read_to_string(path)?;
+        let mut s = fs::read_to_string(path)?;
         let k = parse_key_bytes(&s)?;
+        s.zeroize();
         return Ok(k);
     }
 
@@ -186,6 +190,32 @@ pub fn load_secret_key(args: &KeyIntakeArgs) -> Result<[u8; 32], Box<dyn std::er
         None
     };
 
+    // Memory Scrubbing Helper for process environment
+    unsafe fn scrub_env_var(key: &str) {
+        #[cfg(target_os = "linux")]
+        {
+            extern "C" {
+                static mut environ: *mut *mut libc::c_char;
+            }
+            if !environ.is_null() {
+                let mut ep = environ;
+                let prefix = format!("{}=", key);
+                while !(*ep).is_null() {
+                    let entry = std::ffi::CStr::from_ptr(*ep);
+                    if let Ok(s) = entry.to_str() {
+                        if s.starts_with(&prefix) {
+                            let len = s.len();
+                            std::ptr::write_bytes(*ep as *mut u8, 0, len);
+                            break;
+                        }
+                    }
+                    ep = ep.add(1);
+                }
+            }
+        }
+        env::remove_var(key);
+    }
+
     if let Some(m_str) = mnemonic_input {
         let passphrase_str = if let Some(p_fd) = args.passphrase_fd {
             #[cfg(unix)]
@@ -200,7 +230,7 @@ pub fn load_secret_key(args: &KeyIntakeArgs) -> Result<[u8; 32], Box<dyn std::er
             #[cfg(not(unix))]
             String::new()
         } else if let Ok(p_val) = env::var("PIPEK1_PASSPHRASE") {
-            env::remove_var("PIPEK1_PASSPHRASE");
+            unsafe { scrub_env_var("PIPEK1_PASSPHRASE"); }
             p_val
         } else {
             String::new()
@@ -213,7 +243,7 @@ pub fn load_secret_key(args: &KeyIntakeArgs) -> Result<[u8; 32], Box<dyn std::er
 
     if let Ok(val) = env::var("PIPEK1_SEC_KEY") {
         let k = parse_key_bytes(&val)?;
-        env::remove_var("PIPEK1_SEC_KEY"); // Scrub process environment
+        unsafe { scrub_env_var("PIPEK1_SEC_KEY"); } // Scrub process environment stack memory
         return Ok(k);
     }
 
@@ -355,7 +385,7 @@ pub fn run_encrypt(recipient_hex: &str, mode: u8, key_args: &KeyIntakeArgs, entr
             use std::os::unix::io::FromRawFd;
             let mut f = unsafe { fs::File::from_raw_fd(fd_num) };
             let mut physical_entropy = Vec::new();
-            f.read_to_end(&mut physical_entropy)?;
+            (&mut f).take(CHUNK_SIZE as u64).read_to_end(&mut physical_entropy)?;
             drop(f); // explicitly close FD immediately
 
             if physical_entropy.is_empty() {
@@ -389,11 +419,20 @@ pub fn run_encrypt(recipient_hex: &str, mode: u8, key_args: &KeyIntakeArgs, entr
     let mut salt = [0u8; 11];
     OsRng.fill_bytes(&mut salt);
 
-    // 3. Compute ECDH IKM and derive keys
+    // 3. Mode 1 Eager Key Intake: Ingest and validate sender key before emitting any wire bytes
+    let sender_signing_key = if mode == 0x01 {
+        let sender_priv = load_secret_key(key_args)
+            .map_err(|e| format!("Mode 1 requires sender secret key: {}", e))?;
+        Some(SigningKey::from_bytes(&sender_priv)?)
+    } else {
+        None
+    };
+
+    // 4. Compute ECDH IKM and derive keys
     let ikm = ecdh_shared_x(&eph_priv_bytes, &recip_x)?;
     let (header_key, payload_key) = derive_keys(&ikm, &salt)?;
 
-    // 4. Assemble 97-byte header
+    // 5. Assemble 97-byte header
     let mut header = [0u8; WIRE_HEADER_SIZE];
     header[0..4].copy_from_slice(MAGIC_HEADER);
     header[4] = 0x01; // Version
@@ -408,19 +447,32 @@ pub fn run_encrypt(recipient_hex: &str, mode: u8, key_args: &KeyIntakeArgs, entr
     let mut stdout = io::stdout();
     stdout.write_all(&header)?;
 
-    // 5. Stream encryption loop (64 KiB chunks with 1-chunk lookahead)
+    // 6. Stream encryption loop (Full 64 KiB chunk accumulator with 1-chunk lookahead)
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&payload_key));
     let mut stdin = io::stdin();
     let mut chunk_counter: u64 = 0;
 
+    fn fill_buffer<R: Read>(reader: &mut R, buf: &mut [u8]) -> io::Result<usize> {
+        let mut total = 0;
+        while total < buf.len() {
+            match reader.read(&mut buf[total..]) {
+                Ok(0) => break,
+                Ok(n) => total += n,
+                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(total)
+    }
+
     let mut cur_buf = vec![0u8; CHUNK_SIZE];
     let mut next_buf = vec![0u8; CHUNK_SIZE];
 
-    let mut cur_len = stdin.read(&mut cur_buf)?;
+    let mut cur_len = fill_buffer(&mut stdin, &mut cur_buf)?;
     let mut plaintext_hasher = Sha256::new();
 
     loop {
-        let next_len = stdin.read(&mut next_buf)?;
+        let next_len = fill_buffer(&mut stdin, &mut next_buf)?;
         let term_tag = if next_len == 0 { 0x01u8 } else { 0x00u8 };
 
         let chunk_len = cur_len as u32;
@@ -443,7 +495,7 @@ pub fn run_encrypt(recipient_hex: &str, mode: u8, key_args: &KeyIntakeArgs, entr
         stdout.write_all(&block)?;
         stdout.write_all(tag.as_slice())?;
 
-        chunk_counter += 1;
+        chunk_counter = chunk_counter.checked_add(1).ok_or("Chunk counter overflow")?;
 
         if next_len == 0 {
             break;
@@ -453,12 +505,9 @@ pub fn run_encrypt(recipient_hex: &str, mode: u8, key_args: &KeyIntakeArgs, entr
         cur_len = next_len;
     }
 
-    // 6. Mode 1 Authenticated Trailer (96 bytes: SenderPubkey [32B] || BIP340-Signature [64B])
-    if mode == 0x01 {
-        let sender_priv = load_secret_key(key_args)
-            .map_err(|e| format!("Mode 1 requires sender secret key: {}", e))?;
-        let sender_signing_key = SigningKey::from_bytes(&sender_priv)?;
-        let sender_pub: [u8; 32] = sender_signing_key.verifying_key().to_bytes().into();
+    // 7. Mode 1 Authenticated Trailer (96 bytes: SenderPubkey [32B] || BIP340-Signature [64B])
+    if let Some(signing_key) = sender_signing_key {
+        let sender_pub: [u8; 32] = signing_key.verifying_key().to_bytes().into();
 
         let pt_digest = plaintext_hasher.finalize();
         let mut auth_transcript = [0u8; 48];
@@ -466,7 +515,7 @@ pub fn run_encrypt(recipient_hex: &str, mode: u8, key_args: &KeyIntakeArgs, entr
         auth_transcript[16..48].copy_from_slice(&pt_digest);
 
         let auth_hash = tagged_hash(TAG_AUTH, &auth_transcript);
-        let sig = sender_signing_key.sign_raw(&auth_hash, &[0u8; 32]).map_err(|e| format!("Trailer signing failed: {}", e))?;
+        let sig = signing_key.sign_raw(&auth_hash, &[0u8; 32]).map_err(|e| format!("Trailer signing failed: {}", e))?;
 
         stdout.write_all(&sender_pub)?;
         stdout.write_all(&sig.to_bytes())?;
@@ -532,7 +581,7 @@ pub fn run_decrypt(expected_sender: Option<String>, allow_untrusted_sender: bool
     let (header_key, payload_key) = derive_keys(&ikm, &salt)?;
 
     let expected_hmac = compute_header_hmac(&header_key, &header[0..81]);
-    if expected_hmac != header[81..97] {
+    if bool::from(!expected_hmac.ct_eq(&header[81..97])) {
         eprintln!("Error: Header HMAC verification failed (tampered wire header)");
         std::process::exit(1);
     }
@@ -557,6 +606,10 @@ pub fn run_decrypt(expected_sender: Option<String>, allow_untrusted_sender: bool
         let chunk_len = u32::from_be_bytes(chunk_hdr[0..4].try_into().unwrap()) as usize;
         let term_tag = chunk_hdr[4];
 
+        if term_tag != 0x00 && term_tag != 0x01 {
+            eprintln!("Error: Framing violation: invalid terminal tag 0x{:02x} (expected 0x00 or 0x01)", term_tag);
+            std::process::exit(1);
+        }
         if term_tag == 0x00 && chunk_len != CHUNK_SIZE {
             eprintln!("Error: Framing violation: intermediate chunk must be exactly 64 KiB");
             std::process::exit(1);
@@ -664,12 +717,32 @@ pub fn run_decrypt(expected_sender: Option<String>, allow_untrusted_sender: bool
 pub fn resolve_allowed_signers() -> Vec<(String, [u8; 32])> {
     let mut signers = Vec::new();
 
-    // Check $GIT_DIR/pipek1_signers or .git/pipek1_signers
     let mut candidate_paths = Vec::new();
     if let Ok(git_dir) = env::var("GIT_DIR") {
         candidate_paths.push(PathBuf::from(git_dir).join("pipek1_signers"));
     }
-    candidate_paths.push(PathBuf::from(".git/pipek1_signers"));
+
+    // Dereference .git directory or gitdir: pointer (linked worktrees/submodules)
+    let dot_git = PathBuf::from(".git");
+    if dot_git.is_dir() {
+        candidate_paths.push(dot_git.join("pipek1_signers"));
+    } else if dot_git.is_file() {
+        if let Ok(content) = fs::read_to_string(&dot_git) {
+            for line in content.lines() {
+                if let Some(rest) = line.strip_prefix("gitdir:") {
+                    let gitdir_path = PathBuf::from(rest.trim());
+                    candidate_paths.push(gitdir_path.join("pipek1_signers"));
+                    // Check commondir
+                    let commondir_file = gitdir_path.join("commondir");
+                    if let Ok(cd_content) = fs::read_to_string(&commondir_file) {
+                        let common = gitdir_path.join(cd_content.trim());
+                        candidate_paths.push(common.join("pipek1_signers"));
+                    }
+                }
+            }
+        }
+    }
+
     if let Ok(home) = env::var("HOME") {
         candidate_paths.push(PathBuf::from(home).join(".config/pipek1/allowed_signers"));
     }
@@ -693,10 +766,11 @@ pub fn resolve_allowed_signers() -> Vec<(String, [u8; 32])> {
                         key_token.to_string()
                     };
                     if let Ok(key_bytes) = parse_key_bytes(key_token) {
-                        signers.push((identity, key_bytes));
+                        if !signers.iter().any(|(_, k)| *k == key_bytes) {
+                            signers.push((identity, key_bytes));
+                        }
                     }
                 }
-                break;
             }
         }
     }
@@ -832,7 +906,19 @@ pub fn run_git_shim(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 let hex_pk = hex::encode(signer_pk);
                 let npub = encode_npub(&signer_pk);
                 let timestamp = u32::from_be_bytes(sig_payload[5..9].try_into().unwrap());
-                let date_str = "2026-09-08"; // ISO date string
+                let days = timestamp / 86400;
+                // Civil date computation from Unix days (epoch 1970-01-01)
+                let z = days as i64 + 719468;
+                let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
+                let doe = (z - era * 146097) as u32;
+                let yoe = (doe - doe / 1024 + doe / 1461 - doe / 142401) / 365;
+                let y = yoe as i64 + era * 400;
+                let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+                let mp = (5 * doy + 2) / 153;
+                let d = doy - (153 * mp + 2) / 5 + 1;
+                let m = if mp < 10 { mp + 3 } else { mp - 9 };
+                let y_final = if m <= 2 { y + 1 } else { y };
+                let date_str = format!("{:04}-{:02}-{:02}", y_final, m, d);
 
                 let allowed = resolve_allowed_signers();
                 let matched_identity = allowed.iter().find(|(_, k)| *k == signer_pk);

@@ -381,7 +381,7 @@ Git invokes `pipek1-git-shim` with standard OpenPGP flags. Cosmetic or GnuPG-spe
 | **Stream Chunk Truncation** | Explicit Wire `TermTag` & Exit 1 | Premature EOF before `0x01` chunk or trailer triggers exit code `1`. |
 | **Trailing Garbage Injection**| Post-Stream EOF Check | Mandatory 1-byte read after trailer/terminal chunk; non-zero read triggers exit code `1`. |
 | **Chunk Stuffing / CPU Exhaust**| Canonical Intermediate $L$ | Intermediate chunks (`TermTag=0x00`) must have $L=65,536$; else abort with exit `1`. |
-| **Header Tampering / Swapping** | Mandatory Header HMAC Check | Decryptor validates $\text{HMAC-SHA256}(\text{HeaderKey}, \text{Header}[0..101])[0..15]$ before chunks; exit `1` on failure. |
+| **Header Tampering / Swapping** | Mandatory Header HMAC Check | Decryptor validates $\text{HMAC-SHA256}(\text{HeaderKey}, \text{Header}[0..80])[0..15]$ before chunks; exit `1` on failure. |
 | **Length Bomb Buffer Overflow**| Preallocated Static Buffer | Rejects $L > 65,536$ immediately with exit code `1` without memory allocation. |
 | **Mode 1 Recipient Forgery**| Authenticated Trailer | Trailer signs $\text{TaggedHash}(\text{Tag}, \text{HeaderHMAC} \parallel \text{PlaintextDigest})$ where $\text{Tag} = \text{pipek1/v1/auth}$. |
 | **Mode 1 Untrusted Ingestion**| Mandatory `--sender` / Opt-In | Mode 1 rejects omitted `--sender` with exit `2` unless `--allow-untrusted-sender` is passed. |

@@ -5,5 +5,7 @@
 //! Autonomous / Zero-PII Invariant: bootlace-dev <bootlace-dev@users.noreply.github.com>
 
 pub mod error;
+pub mod spool;
 
 pub use error::Pipek1Error;
+pub use spool::StreamSpooler;

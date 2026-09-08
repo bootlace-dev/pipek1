@@ -137,16 +137,49 @@ else
     exit 1
 fi
 
-# Test 6: Entropy Hedging with Empty FD (Must Abort)
+# Test 6: Entropy Hedging with Empty FD (Must Abort with Exit Code 2)
 echo -n "[TEST 6] Empty --entropy-fd abort handling: "
 set +e
 echo -n "Test payload" | "$PIPEK1" encrypt --recipient "$BOB_PUB" --entropy-fd 3 3< /dev/null 2>/dev/null
 EC=$?
 set -e
-if [ "$EC" -ne 0 ]; then
-    echo "PASS (Aborted with error code $EC)"
+if [ "$EC" -eq 2 ]; then
+    echo "PASS (Aborted with error code 2)"
 else
-    echo "FAIL (Expected non-zero exit code on empty entropy fd)"
+    echo "FAIL (Expected exit code 2 on empty entropy fd, got $EC)"
+    exit 1
+fi
+
+# Test 7: Multi-Megabyte Spool Corruption / Tamper Rejection & Zero RUP
+echo -n "[TEST 7] Corrupted 20 MiB multi-chunk stream rejection: "
+# Corrupt byte at offset 500,000 (inside payload chunk)
+cp "$TMP_DIR/mode1_20mb.pk" "$TMP_DIR/mode1_20mb_corrupt.pk"
+printf '\xff' | dd of="$TMP_DIR/mode1_20mb_corrupt.pk" bs=1 seek=500000 count=1 conv=notrunc status=none
+
+set +e
+PIPEK1_SEC_KEY="$BOB_PRIV" "$PIPEK1" decrypt --sender "$ALICE_PUB" < "$TMP_DIR/mode1_20mb_corrupt.pk" > "$TMP_DIR/corrupt_out" 2>/dev/null
+EC=$?
+set -e
+if [ "$EC" -eq 1 ] && [ ! -s "$TMP_DIR/corrupt_out" ]; then
+    echo "PASS (Exit code 1, zero bytes emitted from corrupted 20 MiB spool)"
+else
+    echo "FAIL (Expected exit code 1 with 0 bytes, got EC=$EC)"
+    exit 1
+fi
+
+# Test 8: Git Porcelain pipek1.allowedSignersFile Config
+echo -n "[TEST 8] Git Porcelain pipek1.allowedSignersFile configuration: "
+GLOBAL_SIGNERS="$TMP_DIR/global_signers"
+echo "ExternalSigner <ext@test.local> $ALICE_PUB" > "$GLOBAL_SIGNERS"
+rm -f "$GIT_TEST_DIR/.git/pipek1_signers"
+git -C "$GIT_TEST_DIR" config pipek1.allowedSignersFile "$GLOBAL_SIGNERS"
+
+SIG_LOG_EXT=$(git -C "$GIT_TEST_DIR" log --show-signature -n 1)
+if echo "$SIG_LOG_EXT" | grep -q "Good signature from \"ExternalSigner"; then
+    echo "PASS (Verified valid signature from external allowedSignersFile)"
+else
+    echo "FAIL: Expected 'Good signature from ExternalSigner' in git log output"
+    echo "$SIG_LOG_EXT"
     exit 1
 fi
 

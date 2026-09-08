@@ -209,7 +209,7 @@ fn test_mode2_rejected_when_sender_provided() {
 
 #[test]
 fn test_pass_through_requires_pub() {
-    let out = Command::new(BIN)
+    let verify_proc = Command::new(BIN)
         .args(["verify", "--pass-through", "--sig", "/dev/null"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -220,3 +220,70 @@ fn test_pass_through_requires_pub() {
     let out = verify_proc.wait_with_output().unwrap();
     assert_eq!(out.status.code(), Some(2));
 }
+
+#[test]
+fn test_missing_recipient_exits_2() {
+    let out = Command::new(BIN)
+        .args(["encrypt"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("Failed to execute pipek1");
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn test_missing_secret_key_exits_2() {
+    let out = Command::new(BIN)
+        .args(["pubkey"])
+        .env_remove("PIPEK1_SEC_KEY")
+        .env_remove("PIPEK1_MNEMONIC")
+        .env_remove("HOME")
+        .output()
+        .expect("Failed to execute pipek1");
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn test_max_size_breach_exits_2() {
+    let payload = b"This payload is longer than ten bytes.";
+
+    let mut enc_proc = Command::new(BIN)
+        .args(["encrypt", "--recipient", BOB_PUB])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn pipek1 encrypt");
+
+    enc_proc.stdin.as_mut().unwrap().write_all(payload).unwrap();
+    let ciphertext = enc_proc.wait_with_output().unwrap().stdout;
+
+    // Decrypt with --max-size 10 must fail with exit code 2
+    let mut dec_proc = Command::new(BIN)
+        .args(["decrypt", "--max-size", "10"])
+        .env("PIPEK1_SEC_KEY", BOB_PRIV)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn pipek1 decrypt");
+
+    dec_proc.stdin.as_mut().unwrap().write_all(&ciphertext).unwrap();
+    let dec_out = dec_proc.wait_with_output().unwrap();
+    assert_eq!(dec_out.status.code(), Some(2));
+}
+
+#[test]
+fn test_bip85_mnemonic_intake_pubkey() {
+    let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    let out = Command::new(BIN)
+        .args(["pubkey"])
+        .env("PIPEK1_MNEMONIC", mnemonic)
+        .env_remove("PIPEK1_SEC_KEY")
+        .output()
+        .expect("Failed to execute pipek1 pubkey with mnemonic");
+
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Npub: npub1"));
+}
+

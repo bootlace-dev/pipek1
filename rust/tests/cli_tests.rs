@@ -82,6 +82,58 @@ fn test_bip340_sign_and_verify_roundtrip() {
 }
 
 #[test]
+fn test_bip340_sign_armor_and_verify_roundtrip() {
+    let payload = b"Cryptographic assertion: armored BIP-340 Schnorr signature roundtrip.";
+
+    // 1. Sign with --armor
+    let mut sign_proc = Command::new(BIN)
+        .args(["sign", "--armor"])
+        .env("PIPEK1_SEC_KEY", ALICE_PRIV)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn pipek1 sign --armor");
+
+    sign_proc.stdin.as_mut().unwrap().write_all(payload).unwrap();
+    let sign_out = sign_proc.wait_with_output().unwrap();
+    assert_eq!(sign_out.status.code(), Some(0));
+    let armored_str = String::from_utf8(sign_out.stdout).expect("Valid UTF-8 output");
+    assert!(armored_str.contains("-----BEGIN PIPE-K1 SIGNATURE-----"));
+    assert!(armored_str.contains("-----END PIPE-K1 SIGNATURE-----"));
+
+    // Write temp armored sig
+    let sig_path = "/tmp/test_cargo_sign_armored.sig";
+    std::fs::write(sig_path, &armored_str).unwrap();
+
+    // 2. Verify Success with armored file
+    let mut verify_proc = Command::new(BIN)
+        .args(["verify", "--sig", sig_path, "--pub", ALICE_PUB])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn pipek1 verify");
+
+    verify_proc.stdin.as_mut().unwrap().write_all(payload).unwrap();
+    let verify_out = verify_proc.wait_with_output().unwrap();
+    assert_eq!(verify_out.status.code(), Some(0));
+
+    // 3. Verify Adversarial Bit-Flip (Must Exit 1)
+    let mut bad_verify_proc = Command::new(BIN)
+        .args(["verify", "--sig", sig_path, "--pub", ALICE_PUB])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn pipek1 verify");
+
+    bad_verify_proc.stdin.as_mut().unwrap().write_all(b"Tampered payload bit").unwrap();
+    let bad_out = bad_verify_proc.wait_with_output().unwrap();
+    assert_eq!(bad_out.status.code(), Some(1));
+
+    let _ = std::fs::remove_file(sig_path);
+}
+
+#[test]
 fn test_mode2_anonymous_stream_roundtrip() {
     let payload = b"Mode 2 Anonymous Forward-Secret Stream Verification Across Pipe Chunks";
 

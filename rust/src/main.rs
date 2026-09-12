@@ -1147,7 +1147,7 @@ fn print_usage() {
     eprintln!("Usage:");
     eprintln!("  pipe-k1 encrypt --recipient <npub|hex> [--entropy-fd <N>]  # Authenticated stream encryption");
     eprintln!("  pipe-k1 decrypt                                           # Spool-and-verify stream decryption");
-    eprintln!("  pipe-k1 sign                                              # Sign stdin stream using PIPE_K1_SEC_KEY env");
+    eprintln!("  pipe-k1 sign [-a|--armor]                                 # Sign stdin stream using PIPE_K1_SEC_KEY env");
     eprintln!("  pipe-k1 verify --sig <file> [--pub <npub|hex>]            # Verify stdin stream against signature file");
     eprintln!("  pipe-k1 pubkey                                            # Display public key and npub from PIPE_K1_SEC_KEY");
     eprintln!("  pipe-k1 hash [tag]                                        # Compute BIP-340 tagged hash over stdin");
@@ -1229,6 +1229,18 @@ fn dispatch_command(args: &[String]) -> Result<(), Pipek1Error> {
             Ok(())
         }
         "sign" => {
+            let mut armor = false;
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "-a" | "--armor" => {
+                        armor = true;
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+
             let (key_args, _) = parse_key_intake_args(args, 2);
             let sk_bytes = load_secret_key(&key_args)?;
             let signing_key = SigningKey::from_bytes(&sk_bytes)
@@ -1249,7 +1261,15 @@ fn dispatch_command(args: &[String]) -> Result<(), Pipek1Error> {
                 .as_secs() as u32;
             let sig_payload = sign_stream_payload(&signing_key, &msg_digest, now);
 
-            io::stdout().write_all(&sig_payload)?;
+            if armor {
+                let b64_sig = base64::engine::general_purpose::STANDARD.encode(sig_payload);
+                println!("-----BEGIN PIPE-K1 SIGNATURE-----");
+                println!();
+                println!("{}", b64_sig);
+                println!("-----END PIPE-K1 SIGNATURE-----");
+            } else {
+                io::stdout().write_all(&sig_payload)?;
+            }
             Ok(())
         }
         "verify" => {

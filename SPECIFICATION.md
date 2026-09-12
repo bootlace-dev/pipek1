@@ -249,7 +249,7 @@ cat file.tar.pk | PIPEK1_SEC_KEY="$MY_NSEC" pipe-k1 decrypt --allow-unverified-s
 cat release.tar.gz | PIPEK1_SEC_KEY="$NSEC" pipe-k1 sign > release.tar.gz.sig
 ```
 * **Flags:**
-  * `--raw`: Outputs raw 105-byte binary payload (default is ASCII armored).
+  * `-a` / `--armor`: Outputs standard ASCII-armored signature block (`-----BEGIN PIPE-K1 SIGNATURE-----`). Default is raw 105-byte binary payload.
   * `--sec-fd <N>` / `--sec-file <path>`: Private key source.
   * `--mnemonic-fd <N>` / `--passphrase-fd <N>` / `--bip85-identity <N>` / `--bip85-index <N>`: BIP-85 key resolution.
 

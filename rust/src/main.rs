@@ -40,6 +40,7 @@ pub const TAG_SIZE: usize = 16;      // Poly1305 16 bytes
 pub const TRAILER_SIZE: usize = 96;  // SenderPubkey (32B) + Signature (64B)
 
 pub const TAG_SIGN: &str = "pipe-k1/v1/sign";
+pub const TAG_SIGN_LEGACY: &str = "pipek1/v1/sign";
 pub const TAG_AUTH: &str = "pipe-k1/v1/auth";
 pub const TAG_ENTROPY: &str = "pipe-k1/v1/entropy";
 pub const INFO_HEADER: &[u8] = b"pipe-k1/v1/header";
@@ -338,14 +339,19 @@ pub fn verify_stream_payload(payload: &[u8; SIGNATURE_PAYLOAD_SIZE], msg_digest:
     ts_and_digest[0..4].copy_from_slice(&timestamp.to_be_bytes());
     ts_and_digest[4..36].copy_from_slice(msg_digest);
 
-    let m_hash = tagged_hash(TAG_SIGN, &ts_and_digest);
     let pk_x = &payload[9..41];
     let sig_bytes = &payload[41..105];
 
     let vk = VerifyingKey::from_bytes(pk_x).map_err(|e| format!("Invalid public key: {}", e))?;
     let sig = Signature::try_from(sig_bytes).map_err(|e| format!("Invalid signature format: {}", e))?;
 
-    vk.verify_raw(&m_hash, &sig).map_err(|e| format!("Schnorr verification failed: {}", e))?;
+    let m_hash = tagged_hash(TAG_SIGN, &ts_and_digest);
+    if let Err(e1) = vk.verify_raw(&m_hash, &sig) {
+        let m_hash_legacy = tagged_hash(TAG_SIGN_LEGACY, &ts_and_digest);
+        vk.verify_raw(&m_hash_legacy, &sig).map_err(|_| {
+            format!("Schnorr verification failed: {}", e1)
+        })?;
+    }
 
     let mut out_pk = [0u8; 32];
     out_pk.copy_from_slice(pk_x);

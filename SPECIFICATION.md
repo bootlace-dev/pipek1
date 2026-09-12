@@ -1,6 +1,6 @@
-# Design Specification: `pipek1` (Stateless UNIX Cryptographic Filter via Secp256k1)
+# Design Specification: `pipe-k1` (Stateless UNIX Cryptographic Filter via Secp256k1)
 
-**Codename:** `pipek1`  
+**Codename:** `pipe-k1`  
 **Status:** RFC / v0.0.1-rc0 (Asymptotically Audited & Deterministic Build Verified)  
 **Target:** Direct drop-in, stateless replacement for GnuPG (`gpg`) across software release signing, git commit authentication, and stream encryption using Bitcoin and Nostr (`secp256k1`) keypairs.  
 **Architectural Invariants:**
@@ -47,10 +47,10 @@ Private keys and seed mnemonics must never be exposed as command-line arguments.
 
 ## 2. Wire Formats & Streaming Protocols
 
-### 2.1 Detached Digital Signatures (`pipek1 sign` / `pipek1 verify`)
+### 2.1 Detached Digital Signatures (`pipe-k1 sign` / `pipe-k1 verify`)
 To prevent signature replay across software releases, Nostr events (NIP-01), and Bitcoin Taproot commits, signatures use BIP-340 tagged hashes:
 
-$$\text{Tag} = \text{"pipek1/v1/sign"}$$
+$$\text{Tag} = \text{"pipe-k1/v1/sign"}$$
 $$\text{TagHash} = \text{SHA-256}(\text{Tag})$$
 $$\text{PayloadDigest} = \text{Streaming-SHA-256}(\text{data})$$
 $$\text{Timestamp} = \text{Unix epoch seconds (4B big-endian)}$$
@@ -71,13 +71,13 @@ $$\text{Total Bytes} = 4 + 1 + 4 + 32 + 64 = 105\text{ bytes}$$
 #### ASCII-Armored Signature Block
 Both release verification and Git plumbing parse this unified block:
 ```text
------BEGIN PIPEK1 SIGNATURE-----
-Version: pipek1-v1
+-----BEGIN PIPE-K1 SIGNATURE-----
+Version: pipe-k1-v1
 
 <base64-encoded 105-byte binary wire payload>
------END PIPEK1 SIGNATURE-----
+-----END PIPE-K1 SIGNATURE-----
 ```
-*(Note: In Git commit signing, `pipek1-git-shim` accepts and outputs standard `-----BEGIN PGP SIGNATURE-----` wrapping the identical 105-byte base64 payload to ensure native Git porcelain compatibility).*
+*(Note: In Git commit signing, `pipe-k1-git-shim` accepts and outputs standard `-----BEGIN PGP SIGNATURE-----` wrapping the identical 105-byte base64 payload to ensure native Git porcelain compatibility).*
 
 ---
 
@@ -112,16 +112,16 @@ Version: pipek1-v1
 1. **Entropy Hedging & Ephemeral Key Generation:**
    * Host CSPRNG generates 32 bytes of kernel entropy: $E_{os} \leftarrow \text{getrandom}(32)$.
    * **Optional Physical Entropy Hedging (`--entropy-fd <N>`):** If an external physical entropy source (e.g. dice/coin flips, airgapped hardware TRNG) is supplied via file descriptor $N$, read arbitrary raw entropy bytes $H_{phys}$. Ephemeral private scalar is derived as:
-     $$E_{priv} = \text{TaggedHash}(\text{"pipek1/v1/entropy"}, E_{os} \parallel H_{phys})$$
-     If $E_{priv} = 0$ or $E_{priv} \ge n$, re-hash iteratively: $E_{priv} = \text{TaggedHash}(\text{"pipek1/v1/entropy"}, E_{priv})$.
+     $$E_{priv} = \text{TaggedHash}(\text{"pipe-k1/v1/entropy"}, E_{os} \parallel H_{phys})$$
+     If $E_{priv} = 0$ or $E_{priv} \ge n$, re-hash iteratively: $E_{priv} = \text{TaggedHash}(\text{"pipe-k1/v1/entropy"}, E_{priv})$.
    * If no external entropy is provided, $E_{priv} = E_{os}$.
    * Ephemeral public point: $E_{pub} = \text{point\_x}(E_{priv} \cdot G)$. Note: Since the affine x-coordinate of $k \cdot P$ is identical to $k \cdot (-P)$, scalar parity negation is optional for ECDH shared point calculation, but canonicalizing $E_{priv}$ to even $Y$ parity ($sk' = n - sk$) matches BIP-340 Schnorr conventions.
 2. Validate $R_{pub}$ via $\text{lift\_x}(R_{pub})$; abort with exit code `2` if invalid local input.
 3. $\text{SharedPoint} = \text{point\_mul}(E_{priv}, \text{lift\_x}(R_{pub}))$. Abort if point is $\mathcal{O}$.
 4. $\text{IKM} = \text{SHA-256}(\text{point\_x}(\text{SharedPoint}))$.
 5. $\text{RootKey} (32\text{B}) = \text{HKDF-Extract}(\text{salt} = \text{Header.Salt}, \text{IKM} = \text{IKM})$.
-6. $\text{HeaderKey} (32\text{B}) = \text{HKDF-Expand}(\text{RootKey}, \text{info} = \text{"pipek1/v1/header"}, L = 32)$.
-7. $\text{PayloadKey} (32\text{B}) = \text{HKDF-Expand}(\text{RootKey}, \text{info} = \text{"pipek1/v1/stream"}, L = 32)$.
+6. $\text{HeaderKey} (32\text{B}) = \text{HKDF-Expand}(\text{RootKey}, \text{info} = \text{"pipe-k1/v1/header"}, L = 32)$.
+7. $\text{PayloadKey} (32\text{B}) = \text{HKDF-Expand}(\text{RootKey}, \text{info} = \text{"pipe-k1/v1/stream"}, L = 32)$.
 8. Compute $\text{HeaderHMAC}[16\text{B}] = \text{HMAC-SHA256}(\text{HeaderKey}, \text{Header}[0..80])[0..15]$.
 
 ##### Recipient Derivation & Verification (Decryption):
@@ -131,8 +131,8 @@ Version: pipek1-v1
 4. $\text{SharedPoint} = \text{point\_mul}(R_{priv}, \text{lift\_x}(E_{pub}))$. Abort with exit code `1` if point is $\mathcal{O}$.
 5. $\text{IKM} = \text{SHA-256}(\text{point\_x}(\text{SharedPoint}))$.
 6. $\text{RootKey} (32\text{B}) = \text{HKDF-Extract}(\text{salt} = \text{Header.Salt}, \text{IKM} = \text{IKM})$.
-7. $\text{HeaderKey} (32\text{B}) = \text{HKDF-Expand}(\text{RootKey}, \text{info} = \text{"pipek1/v1/header"}, L = 32)$.
-8. $\text{PayloadKey} (32\text{B}) = \text{HKDF-Expand}(\text{RootKey}, \text{info} = \text{"pipek1/v1/stream"}, L = 32)$.
+7. $\text{HeaderKey} (32\text{B}) = \text{HKDF-Expand}(\text{RootKey}, \text{info} = \text{"pipe-k1/v1/header"}, L = 32)$.
+8. $\text{PayloadKey} (32\text{B}) = \text{HKDF-Expand}(\text{RootKey}, \text{info} = \text{"pipe-k1/v1/stream"}, L = 32)$.
 9. **Mandatory Header HMAC Check:** Compute $\text{ExpectedHMAC} = \text{HMAC-SHA256}(\text{HeaderKey}, \text{Header}[0..80])[0..15]$.
 10. Execute constant-time comparison $\text{ExpectedHMAC} == \text{Header}[81..96]$. If verification fails, **abort immediately with exit code `1`** before processing any stream chunks.
 
@@ -170,7 +170,7 @@ $$\text{Total Chunk Wire Size} = 4 + 1 + L + 16 = L + 21\text{ bytes}$$
   * In Mode `0x01`, immediately following the terminal chunk ($\text{TermTag} = 0x01$), the wire format appends a **96-byte authenticated trailer**:
     $$\text{Trailer} = \text{SenderPubkey}[32\text{B}] \parallel \text{BIP340-Signature}[64\text{B}]$$
   * The sender signs the overall stream transcript digest:
-    $$\text{AuthDigest} = \text{TaggedHash}(\text{"pipek1/v1/auth"}, \text{HeaderHMAC}[16\text{B}] \parallel \text{Streaming-SHA-256}(\text{Plaintext}))$$
+    $$\text{AuthDigest} = \text{TaggedHash}(\text{"pipe-k1/v1/auth"}, \text{HeaderHMAC}[16\text{B}] \parallel \text{Streaming-SHA-256}(\text{Plaintext}))$$
   * Because the signature commits directly to the plaintext digest and the header HMAC, the recipient **cannot forge** messages to themselves under $PayloadKey$.
 * **Post-Stream EOF Invariant (Universal across Mode 1 and Mode 2):**
   Immediately after validating the 96-byte trailer (Mode 1) or terminal chunk (Mode 2), the decryptor must attempt a 1-byte read from the input stream. If `read()` returns $> 0$ (trailing unauthenticated garbage or concatenated streams), the decryptor must discard all output, cryptographically erase temporary buffers, and abort immediately with **exit code `1`**.

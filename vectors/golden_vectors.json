@@ -1,5 +1,5 @@
 {
-  "title": "pipek1 Specification v1.9 Golden Test Vectors",
+  "title": "pipe-k1 Specification v1.9 Golden Test Vectors",
   "description": "Canonical byte-exact vectors utilizing real historical Bitcoin/Nostr entity keys",
   "entities": {
     "blockstream_security": {
@@ -35,19 +35,19 @@
     "message": "If you leak the root key, all you can do is cry. Keep it cold with BIP-85.",
     "wire_header_97_hex": "504b303101015ea4648045bb1ff222655ddd36e6dceddc43590c26090c486bef38ef450da5bdc77ffcb2d7bd939691767618eb9b032d53e71e9ebdb3cac0a72c26f31535ed1da1b2c3d4e5f60718293a4b14f4f1e8f098d1c229e9a6757da1c3e1",
     "chunk_header_5_hex": "0000004a01",
-    "tagged_hash_sign_hex": "12fa2956dd4c0874c569aa8105543b09be0ac3014a080f8431e707d3f0cce2b5"
+    "tagged_hash_sign_hex": "e8bccbd38bb6c4c89e09736437d132531e41cb1913acc08a4d9d9b8b4e5ee138"
   },
   "exchange_blockstream_to_whitehat": {
     "description": "Blockstream delivering Elements patch confirmation to Liquid Whitehat",
     "message": "All Elements bridge nodes are patched against invalid L-BTC minting. Verify patch.",
     "wire_header_97_hex": "504b3031010179be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5f1e2d3c4b5a69788796a5b476efe480365c4431f81ffd8c1c6b98c",
     "chunk_header_5_hex": "0000005201",
-    "tagged_hash_sign_hex": "4c7a79789c27e2f5d580a681458244ddee5d2a73c2f7df2e9fbd0a6f629772a9"
+    "tagged_hash_sign_hex": "3b3d30ca8a5d5f298f37edae0aaf9144ad819143539925d9445f1b36fbd582e8"
   },
   "entropy_hedging_vector": {
-    "description": "Hybrid Entropy Hedging: TaggedHash('pipek1/v1/entropy', OsEntropy || PhysicalEntropy)",
+    "description": "Hybrid Entropy Hedging: TaggedHash('pipe-k1/v1/entropy', OsEntropy || PhysicalEntropy)",
     "os_entropy_hex": "0000000000000000000000000000000000000000000000000000000000000001",
     "physical_entropy_utf8": "d6:123456 coin:HHTTHTHH",
-    "hedged_scalar_hex": "0ee3a90478dd2dde4212027b3a6ed5362d02f414a4e449dfde1899ecfa781905"
+    "hedged_scalar_hex": "6316900895843373db00306169c71ff02c275b2dffc73574bd27d4b568e0dc59"
   }
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 bootlace-dev
 
-//! pipek1: Pure Stateless UNIX Cryptographic Filter (Specification v0.0.1-rc0)
+//! pipe-k1: Pure Stateless UNIX Cryptographic Filter (Specification v0.0.1-rc0)
 //! Anonymous / Zero-PII Invariant: bootlace-dev <bootlace-dev@users.noreply.github.com>
 
 use base64::Engine as _;
@@ -24,7 +24,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pipek1::Pipek1Error;
+use pipe_k1::Pipek1Error;
 mod spool;
 use spool::StreamSpooler;
 
@@ -39,11 +39,11 @@ pub const CHUNK_SIZE: usize = 65536; // 64 KiB
 pub const TAG_SIZE: usize = 16;      // Poly1305 16 bytes
 pub const TRAILER_SIZE: usize = 96;  // SenderPubkey (32B) + Signature (64B)
 
-pub const TAG_SIGN: &str = "pipek1/v1/sign";
-pub const TAG_AUTH: &str = "pipek1/v1/auth";
-pub const TAG_ENTROPY: &str = "pipek1/v1/entropy";
-pub const INFO_HEADER: &[u8] = b"pipek1/v1/header";
-pub const INFO_STREAM: &[u8] = b"pipek1/v1/stream";
+pub const TAG_SIGN: &str = "pipe-k1/v1/sign";
+pub const TAG_AUTH: &str = "pipe-k1/v1/auth";
+pub const TAG_ENTROPY: &str = "pipe-k1/v1/entropy";
+pub const INFO_HEADER: &[u8] = b"pipe-k1/v1/header";
+pub const INFO_STREAM: &[u8] = b"pipe-k1/v1/stream";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -129,8 +129,11 @@ pub fn scrub_env_var(key: &str) {
 }
 
 pub fn scrub_all_sensitive_env() {
+    scrub_env_var("PIPE_K1_SEC_KEY");
     scrub_env_var("PIPEK1_SEC_KEY");
+    scrub_env_var("PIPE_K1_MNEMONIC");
     scrub_env_var("PIPEK1_MNEMONIC");
+    scrub_env_var("PIPE_K1_PASSPHRASE");
     scrub_env_var("PIPEK1_PASSPHRASE");
 }
 
@@ -199,9 +202,9 @@ pub fn load_secret_key(args: &KeyIntakeArgs) -> Result<[u8; 32], Pipek1Error> {
     }
 
     // Eagerly grab env vars, then scrub environ immediately
-    let mut env_mnemonic = env::var("PIPEK1_MNEMONIC").ok();
-    let mut env_passphrase = env::var("PIPEK1_PASSPHRASE").ok();
-    let mut env_sec_key = env::var("PIPEK1_SEC_KEY").ok();
+    let mut env_mnemonic = env::var("PIPE_K1_MNEMONIC").or_else(|_| env::var("PIPEK1_MNEMONIC")).ok();
+    let mut env_passphrase = env::var("PIPE_K1_PASSPHRASE").or_else(|_| env::var("PIPEK1_PASSPHRASE")).ok();
+    let mut env_sec_key = env::var("PIPE_K1_SEC_KEY").or_else(|_| env::var("PIPEK1_SEC_KEY")).ok();
     scrub_all_sensitive_env();
 
     if let Some(fd_num) = args.sec_fd {
@@ -277,11 +280,13 @@ pub fn load_secret_key(args: &KeyIntakeArgs) -> Result<[u8; 32], Pipek1Error> {
         return Ok(k);
     }
 
-    // Git fallback key check: ~/.config/pipek1/git_key
+    // Git fallback key check: ~/.config/pipe-k1/git_key (fallback: ~/.config/pipek1/git_key)
     if let Ok(home) = env::var("HOME") {
-        let git_key_path = PathBuf::from(home).join(".config/pipek1/git_key");
-        if git_key_path.is_file() {
-            if let Ok(mut s) = fs::read_to_string(&git_key_path) {
+        let p1 = PathBuf::from(&home).join(".config/pipe-k1/git_key");
+        let p2 = PathBuf::from(&home).join(".config/pipek1/git_key");
+        let git_key_path = if p1.is_file() { Some(p1) } else if p2.is_file() { Some(p2) } else { None };
+        if let Some(path) = git_key_path {
+            if let Ok(mut s) = fs::read_to_string(&path) {
                 let res = parse_key_bytes(&s);
                 s.zeroize();
                 if let Ok(k) = res {
@@ -291,7 +296,7 @@ pub fn load_secret_key(args: &KeyIntakeArgs) -> Result<[u8; 32], Pipek1Error> {
         }
     }
 
-    Err(Pipek1Error::UsageError("No secret key provided: set PIPEK1_SEC_KEY, pass --sec-fd / --sec-file, or supply --mnemonic-fd / PIPEK1_MNEMONIC for BIP-85".into()))
+    Err(Pipek1Error::UsageError("No secret key provided: set PIPE_K1_SEC_KEY (or PIPEK1_SEC_KEY), pass --sec-fd / --sec-file, or supply --mnemonic-fd / PIPE_K1_MNEMONIC for BIP-85".into()))
 }
 
 /// Formats a 32-byte public key as Bech32 npub
@@ -438,7 +443,7 @@ pub fn run_encrypt(recipient_hex: &str, mode: u8, key_args: &KeyIntakeArgs, entr
                 return Err(Pipek1Error::UsageError("Entropy file descriptor was empty".into()));
             }
 
-            // TaggedHash("pipek1/v1/entropy", OsRng || PhysicalEntropy)
+            // TaggedHash("pipe-k1/v1/entropy", OsRng || PhysicalEntropy)
             let mut hedge_input = Vec::with_capacity(32 + physical_entropy.len());
             hedge_input.extend_from_slice(&os_entropy);
             hedge_input.extend_from_slice(&physical_entropy);
@@ -760,27 +765,39 @@ pub fn resolve_allowed_signers() -> Vec<(String, [u8; 32])> {
     let mut signers = Vec::new();
     let mut candidate_paths = Vec::new();
 
-    // Check git config pipek1.allowedSignersFile
-    if let Ok(output) = std::process::Command::new("git").args(["config", "--get", "pipek1.allowedSignersFile"]).output() {
-        if output.status.success() {
-            let p = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !p.is_empty() {
-                candidate_paths.push(PathBuf::from(p));
+    // Check git config pipe-k1.allowedSignersFile / pipek1.allowedSignersFile
+    let get_config = |key: &str| -> Option<String> {
+        let out = std::process::Command::new("git").args(["config", "--get", key]).output().ok()?;
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() {
+                return Some(s);
             }
         }
+        None
+    };
+
+    if let Some(p) = get_config("pipe-k1.allowedSignersFile").or_else(|| get_config("pipek1.allowedSignersFile")) {
+        candidate_paths.push(PathBuf::from(p));
     }
 
-    // Check git config pipek1.allowInTreeSigners (default: true)
-    let allow_in_tree = match std::process::Command::new("git").args(["config", "--bool", "--get", "pipek1.allowInTreeSigners"]).output() {
-        Ok(out) if out.status.success() => {
+    // Check git config pipe-k1.allowInTreeSigners / pipek1.allowInTreeSigners (default: true)
+    let get_bool = |key: &str| -> Option<bool> {
+        let out = std::process::Command::new("git").args(["config", "--bool", "--get", key]).output().ok()?;
+        if out.status.success() {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
-            s != "false"
+            return Some(s != "false");
         }
-        _ => true,
+        None
     };
+
+    let allow_in_tree = get_bool("pipe-k1.allowInTreeSigners")
+        .or_else(|| get_bool("pipek1.allowInTreeSigners"))
+        .unwrap_or(true);
 
     if allow_in_tree {
         if let Ok(git_dir) = env::var("GIT_DIR") {
+            candidate_paths.push(PathBuf::from(&git_dir).join("pipe-k1_signers"));
             candidate_paths.push(PathBuf::from(git_dir).join("pipek1_signers"));
         }
 
@@ -789,6 +806,7 @@ pub fn resolve_allowed_signers() -> Vec<(String, [u8; 32])> {
             loop {
                 let dot_git = curr.join(".git");
                 if dot_git.is_dir() {
+                    candidate_paths.push(dot_git.join("pipe-k1_signers"));
                     candidate_paths.push(dot_git.join("pipek1_signers"));
                     break;
                 } else if dot_git.is_file() {
@@ -799,6 +817,7 @@ pub fn resolve_allowed_signers() -> Vec<(String, [u8; 32])> {
                                 if !gitdir_path.is_absolute() {
                                     gitdir_path = curr.join(gitdir_path);
                                 }
+                                candidate_paths.push(gitdir_path.join("pipe-k1_signers"));
                                 candidate_paths.push(gitdir_path.join("pipek1_signers"));
                                 let commondir_file = gitdir_path.join("commondir");
                                 if let Ok(cd_content) = fs::read_to_string(&commondir_file) {
@@ -807,8 +826,10 @@ pub fn resolve_allowed_signers() -> Vec<(String, [u8; 32])> {
                                         common = gitdir_path.join(common);
                                     }
                                     if let Ok(canon) = common.canonicalize() {
+                                        candidate_paths.push(canon.join("pipe-k1_signers"));
                                         candidate_paths.push(canon.join("pipek1_signers"));
                                     } else {
+                                        candidate_paths.push(common.join("pipe-k1_signers"));
                                         candidate_paths.push(common.join("pipek1_signers"));
                                     }
                                 }
@@ -825,6 +846,7 @@ pub fn resolve_allowed_signers() -> Vec<(String, [u8; 32])> {
     }
 
     if let Ok(home) = env::var("HOME") {
+        candidate_paths.push(PathBuf::from(&home).join(".config/pipe-k1/allowed_signers"));
         candidate_paths.push(PathBuf::from(home).join(".config/pipek1/allowed_signers"));
     }
 
@@ -938,16 +960,16 @@ pub fn run_git_shim(args: &[String]) -> Result<(), Pipek1Error> {
         let sig_raw = fs::read(&sig_p).map_err(|e| Pipek1Error::UsageError(format!("Cannot read signature: {}", e)))?;
         // Detach ASCII armor if present
         let sig_bytes = if let Ok(s) = std::str::from_utf8(&sig_raw) {
-            if s.contains("BEGIN PGP SIGNATURE") {
+            if s.contains("SIGNATURE") && (s.contains("BEGIN PGP SIGNATURE") || s.contains("BEGIN PIPE-K1 SIGNATURE") || s.contains("BEGIN PIPEK1 SIGNATURE")) {
                 let mut b64 = String::new();
                 let mut capture = false;
                 for line in s.lines() {
                     let tr = line.trim();
-                    if tr.contains("BEGIN PGP SIGNATURE") {
+                    if tr.contains("BEGIN PGP SIGNATURE") || tr.contains("BEGIN PIPE-K1 SIGNATURE") || tr.contains("BEGIN PIPEK1 SIGNATURE") {
                         capture = true;
                         continue;
                     }
-                    if tr.contains("END PGP SIGNATURE") {
+                    if tr.contains("END PGP SIGNATURE") || tr.contains("END PIPE-K1 SIGNATURE") || tr.contains("END PIPEK1 SIGNATURE") {
                         break;
                     }
                     if capture && !tr.is_empty() && !tr.contains(':') {
@@ -965,7 +987,7 @@ pub fn run_git_shim(args: &[String]) -> Result<(), Pipek1Error> {
 
         if sig_bytes.len() != SIGNATURE_PAYLOAD_SIZE {
             write_status_fd(status_fd, "[GNUPG:] NEWSIG\n[GNUPG:] ERRSIG 0000000000000000 1 8 00 0000000000 9\n");
-            eprintln!("pipek1-git-shim: error: malformed or unrecognized signature format");
+            eprintln!("pipe-k1-git-shim: error: malformed or unrecognized signature format");
             return Err(Pipek1Error::WireCorruption("malformed or unrecognized signature format".into()));
         }
 
@@ -1026,7 +1048,7 @@ pub fn run_git_shim(args: &[String]) -> Result<(), Pipek1Error> {
                 let npub = encode_npub(signer_pk);
                 write_status_fd(status_fd, "[GNUPG:] NEWSIG\n");
                 write_status_fd(status_fd, &format!("[GNUPG:] BADSIG {} {}\n", hex_pk, npub));
-                eprintln!("pipek1-git-shim: signature verification failed: {}", e);
+                eprintln!("pipe-k1-git-shim: signature verification failed: {}", e);
                 Err(Pipek1Error::AuthFailure(format!("signature verification failed: {}", e)))
             }
         }
@@ -1042,7 +1064,7 @@ pub fn run_git_shim(args: &[String]) -> Result<(), Pipek1Error> {
             if let Ok(exp_bytes) = parse_key_bytes(kid) {
                 if exp_bytes != pk_x.as_slice() {
                     write_status_fd(status_fd, &format!("[GNUPG:] INV_SGNR 0 {}\n", kid));
-                    eprintln!("pipek1-git-shim: error: signing key {} does not match configured secret key", kid);
+                    eprintln!("pipe-k1-git-shim: error: signing key {} does not match configured secret key", kid);
                     return Err(Pipek1Error::UsageError(format!("signing key {} does not match configured secret key", kid)));
                 }
             }
@@ -1115,16 +1137,16 @@ fn parse_key_intake_args(args: &[String], start_idx: usize) -> (KeyIntakeArgs, u
 }
 
 fn print_usage() {
-    eprintln!("pipek1 v0.1.0 - Stateless secp256k1 UNIX cryptographic stream filter");
+    eprintln!("pipe-k1 v0.1.0 - Stateless secp256k1 UNIX cryptographic stream filter");
     eprintln!("Usage:");
-    eprintln!("  pipek1 encrypt --recipient <npub|hex> [--entropy-fd <N>]  # Authenticated stream encryption");
-    eprintln!("  pipek1 decrypt                                           # Spool-and-verify stream decryption");
-    eprintln!("  pipek1 sign                                              # Sign stdin stream using PIPEK1_SEC_KEY env");
-    eprintln!("  pipek1 verify --sig <file> [--pub <npub|hex>]            # Verify stdin stream against signature file");
-    eprintln!("  pipek1 pubkey                                            # Display public key and npub from PIPEK1_SEC_KEY");
-    eprintln!("  pipek1 hash [tag]                                        # Compute BIP-340 tagged hash over stdin");
-    eprintln!("  pipek1 inspect-header                                    # Parse 97-byte wire header from stdin");
-    eprintln!("  pipek1 inspect-chunk                                     # Parse 5-byte chunk framing header from stdin");
+    eprintln!("  pipe-k1 encrypt --recipient <npub|hex> [--entropy-fd <N>]  # Authenticated stream encryption");
+    eprintln!("  pipe-k1 decrypt                                           # Spool-and-verify stream decryption");
+    eprintln!("  pipe-k1 sign                                              # Sign stdin stream using PIPE_K1_SEC_KEY env");
+    eprintln!("  pipe-k1 verify --sig <file> [--pub <npub|hex>]            # Verify stdin stream against signature file");
+    eprintln!("  pipe-k1 pubkey                                            # Display public key and npub from PIPE_K1_SEC_KEY");
+    eprintln!("  pipe-k1 hash [tag]                                        # Compute BIP-340 tagged hash over stdin");
+    eprintln!("  pipe-k1 inspect-header                                    # Parse 97-byte wire header from stdin");
+    eprintln!("  pipe-k1 inspect-chunk                                     # Parse 5-byte chunk framing header from stdin");
 }
 
 fn dispatch_command(args: &[String]) -> Result<(), Pipek1Error> {
@@ -1267,16 +1289,16 @@ fn dispatch_command(args: &[String]) -> Result<(), Pipek1Error> {
 
             // Detach ASCII armor if present
             let sig_bytes = if let Ok(s) = std::str::from_utf8(&sig_raw) {
-                if s.contains("BEGIN PGP SIGNATURE") {
+                if s.contains("SIGNATURE") && (s.contains("BEGIN PGP SIGNATURE") || s.contains("BEGIN PIPE-K1 SIGNATURE") || s.contains("BEGIN PIPEK1 SIGNATURE")) {
                     let mut b64 = String::new();
                     let mut capture = false;
                     for line in s.lines() {
                         let tr = line.trim();
-                        if tr.contains("BEGIN PGP SIGNATURE") {
+                        if tr.contains("BEGIN PGP SIGNATURE") || tr.contains("BEGIN PIPE-K1 SIGNATURE") || tr.contains("BEGIN PIPEK1 SIGNATURE") {
                             capture = true;
                             continue;
                         }
-                        if tr.contains("END PGP SIGNATURE") {
+                        if tr.contains("END PGP SIGNATURE") || tr.contains("END PIPE-K1 SIGNATURE") || tr.contains("END PIPEK1 SIGNATURE") {
                             break;
                         }
                         if capture && !tr.is_empty() && !tr.contains(':') {
@@ -1358,7 +1380,7 @@ fn dispatch_command(args: &[String]) -> Result<(), Pipek1Error> {
             if &header[0..4] != MAGIC_HEADER {
                 return Err(Pipek1Error::WireCorruption("Invalid magic bytes (expected PK01)".into()));
             }
-            println!("Valid pipek1 Wire Header (97 bytes):");
+            println!("Valid pipe-k1 Wire Header (97 bytes):");
             println!("  Magic:        {}", String::from_utf8_lossy(&header[0..4]));
             println!("  Version:      0x{:02x}", header[4]);
             println!("  Mode:         0x{:02x}", header[5]);
@@ -1373,7 +1395,7 @@ fn dispatch_command(args: &[String]) -> Result<(), Pipek1Error> {
             io::stdin().read_exact(&mut chunk_hdr)?;
             let len = u32::from_be_bytes(chunk_hdr[0..4].try_into().unwrap());
             let term = chunk_hdr[4];
-            println!("Valid pipek1 Chunk Header (5 bytes):");
+            println!("Valid pipe-k1 Chunk Header (5 bytes):");
             println!("  Payload Length: {} bytes", len);
             println!("  Terminal Tag:   0x{:02x} ({})", term, if term == 0x01 { "TERMINAL" } else { "INTERMEDIATE" });
             Ok(())

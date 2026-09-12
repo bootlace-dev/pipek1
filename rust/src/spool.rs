@@ -56,7 +56,7 @@ impl StreamSpooler {
         }
 
         // Fallback: Named temp file created with mode 0600 and unlinked immediately
-        let tmp_path = format!("{}/.pipek1_spool_{}_{}", tmp_dir, std::process::id(), OsRng.next_u64());
+        let tmp_path = format!("{}/.pipe-k1_spool_{}_{}", tmp_dir, std::process::id(), OsRng.next_u64());
         let mut opts = fs::OpenOptions::new();
         opts.read(true).write(true).create(true).truncate(true);
         #[cfg(unix)]

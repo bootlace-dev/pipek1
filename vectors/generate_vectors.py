@@ -57,8 +57,8 @@ def main():
     msg_b = b"All Elements bridge nodes are patched against invalid L-BTC minting. Verify patch."
     
     ts_bytes = struct.pack(">I", 1788865892)
-    th_a = tagged_hash("pipek1/v1/sign", ts_bytes + hashlib.sha256(msg_a).digest())
-    th_b = tagged_hash("pipek1/v1/sign", ts_bytes + hashlib.sha256(msg_b).digest())
+    th_a = tagged_hash("pipe-k1/v1/sign", ts_bytes + hashlib.sha256(msg_a).digest())
+    th_b = tagged_hash("pipe-k1/v1/sign", ts_bytes + hashlib.sha256(msg_b).digest())
 
     # 4. Chunk Framings (5B header: Length [4B BE] || TermTag [1B])
     chk_a_hdr = struct.pack(">IB", len(msg_a), 0x01) # Terminal chunk
@@ -67,10 +67,10 @@ def main():
     # 5. Hybrid Entropy Hedging Vector (OsRng 32B + Physical Coin/Dice Entropy)
     os_entropy_test = bytes.fromhex("0000000000000000000000000000000000000000000000000000000000000001")
     phys_entropy_test = b"d6:123456 coin:HHTTHTHH"
-    th_entropy = tagged_hash("pipek1/v1/entropy", os_entropy_test + phys_entropy_test)
+    th_entropy = tagged_hash("pipe-k1/v1/entropy", os_entropy_test + phys_entropy_test)
 
     manifest = {
-        "title": "pipek1 Specification v1.9 Golden Test Vectors",
+        "title": "pipe-k1 Specification v1.9 Golden Test Vectors",
         "description": "Canonical byte-exact vectors utilizing real historical Bitcoin/Nostr entity keys",
         "entities": entities,
         "exchange_constant_to_calle": {
@@ -88,7 +88,7 @@ def main():
             "tagged_hash_sign_hex": th_b.hex()
         },
         "entropy_hedging_vector": {
-            "description": "Hybrid Entropy Hedging: TaggedHash('pipek1/v1/entropy', OsEntropy || PhysicalEntropy)",
+            "description": "Hybrid Entropy Hedging: TaggedHash('pipe-k1/v1/entropy', OsEntropy || PhysicalEntropy)",
             "os_entropy_hex": os_entropy_test.hex(),
             "physical_entropy_utf8": phys_entropy_test.decode('utf-8'),
             "hedged_scalar_hex": th_entropy.hex()

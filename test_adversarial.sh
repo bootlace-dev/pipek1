@@ -4,8 +4,8 @@
 
 set -euo pipefail
 
-PIPEK1="/home/bootlace/dev/pipek1/rust/target/release/pipek1"
-SHIM="/home/bootlace/dev/pipek1/rust/target/release/pipek1"
+PIPEK1="/home/bootlace/dev/pipek1/rust/target/release/pipe-k1"
+SHIM="/home/bootlace/dev/pipek1/rust/target/release/pipe-k1"
 
 ALICE_PRIV="0101010101010101010101010101010101010101010101010101010101010101"
 ALICE_PUB="1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"

@@ -9,7 +9,7 @@
 # ==============================================================================
 set -euo pipefail
 
-PIPEK1="/home/bootlace/dev/pipek1/rust/target/release/pipek1"
+PIPEK1="/home/bootlace/dev/pipek1/rust/target/release/pipe-k1"
 
 if [[ $# -lt 2 ]]; then
     echo "Usage: $0 <MASTER_SEC_KEY_OR_NSEC> <CHILD_SEC_KEY_OR_NSEC>"

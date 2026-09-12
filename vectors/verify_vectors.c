@@ -17,9 +17,9 @@
 #define PIPEK1_MAGIC "PK01"
 #define PIPEK1_VERSION 0x01
 
-#define TAG_SIGN    "pipek1/v1/sign"
-#define TAG_AUTH    "pipek1/v1/auth"
-#define TAG_ENTROPY "pipek1/v1/entropy"
+#define TAG_SIGN    "pipe-k1/v1/sign"
+#define TAG_AUTH    "pipe-k1/v1/auth"
+#define TAG_ENTROPY "pipe-k1/v1/entropy"
 
 #pragma pack(push, 1)
 typedef struct {
@@ -79,9 +79,9 @@ int main(void) {
     assert(__builtin_offsetof(pipek1_trailer_t, signature) == 32);
 
     /* Assert domain separation tag strings */
-    assert(strcmp(TAG_SIGN, "pipek1/v1/sign") == 0);
-    assert(strcmp(TAG_AUTH, "pipek1/v1/auth") == 0);
-    assert(strcmp(TAG_ENTROPY, "pipek1/v1/entropy") == 0);
+    assert(strcmp(TAG_SIGN, "pipe-k1/v1/sign") == 0);
+    assert(strcmp(TAG_AUTH, "pipe-k1/v1/auth") == 0);
+    assert(strcmp(TAG_ENTROPY, "pipe-k1/v1/entropy") == 0);
 
     printf("[PASS] C Struct Layout Verification:\n");
     printf("  - Wire Header:        %zu bytes (Expected: 97)\n", sizeof(pipek1_header_t));

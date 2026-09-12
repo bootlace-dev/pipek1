@@ -20,7 +20,7 @@ docker run --rm \
         RUSTFLAGS="--remap-path-prefix=/code=. --remap-path-prefix=/usr/local/cargo=. -C target-cpu=generic" cargo build --release
     '
 
-BIN="$ROOT_DIR/rust/target/release/pipek1"
+BIN="$ROOT_DIR/rust/target/release/pipe-k1"
 HASH="$(sha256sum "$BIN" | awk '{print $1}')"
 SIZE="$(stat -c %s "$BIN")"
 

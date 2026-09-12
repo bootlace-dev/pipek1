@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-PIPEK1="/home/bootlace/dev/pipek1/rust/target/release/pipek1"
+PIPEK1="/home/bootlace/dev/pipek1/rust/target/release/pipe-k1"
 VECTORS="/home/bootlace/dev/pipek1/vectors/golden_vectors.json"
 
 echo "=================================================================="
@@ -61,7 +61,7 @@ ts = struct.pack('>I', 1788865892)
 msg = b'If you leak the root key, all you can do is cry. Keep it cold with BIP-85.'
 payload = ts + hashlib.sha256(msg).digest()
 import sys; sys.stdout.buffer.write(payload)
-" | "$PIPEK1" hash "pipek1/v1/sign")
+" | "$PIPEK1" hash "pipe-k1/v1/sign")
 
 echo "  Golden Hash: $GOLDEN_TH"
 echo "  Rust Output: $ACTUAL_TH"
@@ -90,7 +90,7 @@ with open('$VECTORS') as f:
 os_ent = bytes.fromhex(v['entropy_hedging_vector']['os_entropy_hex'])
 phys_ent = v['entropy_hedging_vector']['physical_entropy_utf8'].encode('utf-8')
 sys.stdout.buffer.write(os_ent + phys_ent)
-" | "$PIPEK1" hash "pipek1/v1/entropy")
+" | "$PIPEK1" hash "pipe-k1/v1/entropy")
 
 echo "  Golden Hash: $GOLDEN_ENTROPY_TH"
 echo "  Rust Output: $ACTUAL_ENTROPY_TH"

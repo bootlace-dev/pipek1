@@ -4,7 +4,7 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-const BIN: &str = env!("CARGO_BIN_EXE_pipek1");
+const BIN: &str = env!("CARGO_BIN_EXE_pipe-k1");
 
 // Deterministic test keys from golden vectors
 const ALICE_PRIV: &str = "0101010101010101010101010101010101010101010101010101010101010101";

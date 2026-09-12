@@ -113,7 +113,7 @@ def main():
         "statement_child_to_master": statement_child_to_master
     }
 
-    out_file = "/home/bootlace/dev/pipek1/vectors/cross_signing_bundle.json"
+    out_file = "/home/bootlace/dev/pipe-k1/vectors/cross_signing_bundle.json"
     with open(out_file, "w") as f:
         json.dump(out_data, f, indent=2)
 

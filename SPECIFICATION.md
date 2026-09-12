@@ -31,7 +31,7 @@ Private keys and seed mnemonics must never be exposed as command-line arguments.
 
 #### Key Intake Vectors
 1. **Environment Variables:** `PIPEK1_SEC_KEY` (Bech32 `nsec1...`, 64-char hex scalar, or Base58Check WIF) and `PIPEK1_MNEMONIC` (BIP-39 mnemonic phrase).
-2. **File Descriptor:** `--sec-fd <N>` (e.g. `pipek1 sign --sec-fd 3 3<<<"$NSEC"`).
+2. **File Descriptor:** `--sec-fd <N>` (e.g. `pipe-k1 sign --sec-fd 3 3<<<"$NSEC"`).
 3. **Protected Path:** `--sec-file <path>` (e.g. `/dev/shm/key.sec`).
 4. **Deterministic Derivation (BIP-85 Application `128002'`):**
    * Path: `m/83696968'/128002'/<identity>'/<index>'` where `<identity>` and `<index>` are 31-bit unsigned integers ($0 \le i < 2^{31}$).
@@ -39,7 +39,7 @@ Private keys and seed mnemonics must never be exposed as command-line arguments.
    * Entropy extraction per BIP-85: $K = \text{HMAC-SHA512}(\text{Key} = \text{"bip-entropy-from-k"}, \text{Data} = \text{BIP32ChildPrivateKeyScalar}_{32\text{B}})$.
    * **Scalar Extraction & Boundary Rule:** From the 64-byte HMAC output, extract the **first 32 bytes (256 most significant bits)**. If $sk = 0$ or $sk \ge n$, derivation fails hard and exits with code `2`.
 5. **Process Environment Scrubbing & Descriptor Hygiene:**
-   * **Comprehensive Environment Scrubbing:** Immediately upon ingestion, `pipek1` locates and overwrites the memory occupied by both `PIPEK1_SEC_KEY` and `PIPEK1_MNEMONIC` in the process environment block (`environ`) with zeros (`memset_s` / explicit volatile wipe) and calls `prctl(PR_SET_DUMPABLE, 0)` on Linux to restrict unprivileged `/proc/$PID/environ` inspection, ptrace attachment, and core-dump generation.
+   * **Comprehensive Environment Scrubbing:** Immediately upon ingestion, `pipe-k1` locates and overwrites the memory occupied by both `PIPEK1_SEC_KEY` and `PIPEK1_MNEMONIC` in the process environment block (`environ`) with zeros (`memset_s` / explicit volatile wipe) and calls `prctl(PR_SET_DUMPABLE, 0)` on Linux to restrict unprivileged `/proc/$PID/environ` inspection, ptrace attachment, and core-dump generation.
    * **Descriptor Closure & File Hygiene:** All secret-intake file descriptors (`--sec-fd`, `--mnemonic-fd`, `--passphrase-fd`) as well as file handles opened via `--sec-file` are opened with `O_CLOEXEC` / `FD_CLOEXEC` and are **immediately closed (`close(fd)`)** once key contents have been read into resident memory.
    * All scalar registers, mnemonic buffers, and intermediate ECDH points are allocated in `mlock`-pinned memory and explicitly wiped on drop (`ZeroizeOnDrop`).
 
@@ -180,23 +180,23 @@ $$\text{Total Chunk Wire Size} = 4 + 1 + L + 16 = L + 21\text{ bytes}$$
 ## 3. UNIX CLI Pipeline & Subcommands
 
 ### Universal Exit Code Specification
-Across all `pipek1` subcommands, exit codes adhere strictly to:
+Across all `pipe-k1` subcommands, exit codes adhere strictly to:
 * `0` = **Success**: Signature valid, stream authenticated and processed.
 * `1` = **Cryptographic / Wire Authentication Failure**: Signature mismatch, AEAD Poly1305 tag verification failure, header HMAC mismatch, trailer forgery, unexpected sender identity, malformed wire header/chunk framing, invalid ephemeral curve point, premature EOF / stream truncation, or unauthenticated trailing bytes.
 * `2` = **Local Operational Failure**: Invalid command-line arguments, nonexistent or unreadable local key files, payload exceeding configured `--max-size`, out of memory, or local disk full (`ENOSPC`).
 
 ---
 
-### 3.1 Encryption (`pipek1 encrypt`)
+### 3.1 Encryption (`pipe-k1 encrypt`)
 ```bash
 # Mode 2 (Anonymous Ephemeral - Default):
-cat file.tar | pipek1 encrypt --recipient "$RECIPIENT_NPUB" > file.tar.pk
+cat file.tar | pipe-k1 encrypt --recipient "$RECIPIENT_NPUB" > file.tar.pk
 
 # Mode 1 (Authenticated Sender):
-cat file.tar | PIPEK1_SEC_KEY="$MY_NSEC" pipek1 encrypt --mode 1 --recipient "$RECIPIENT_NPUB" > file.tar.pk
+cat file.tar | PIPEK1_SEC_KEY="$MY_NSEC" pipe-k1 encrypt --mode 1 --recipient "$RECIPIENT_NPUB" > file.tar.pk
 
 # Deterministic Derivation via BIP-85:
-cat file.tar | pipek1 encrypt --bip85-identity 1 --bip85-index 0 --mnemonic-fd 3 --recipient "$RECIPIENT_NPUB" 3<mnemonic.txt > file.tar.pk
+cat file.tar | pipe-k1 encrypt --bip85-identity 1 --bip85-index 0 --mnemonic-fd 3 --recipient "$RECIPIENT_NPUB" 3<mnemonic.txt > file.tar.pk
 ```
 * **Flags:**
   * `--recipient <npub|hex>` (Required): Target recipient public key.
@@ -207,30 +207,30 @@ cat file.tar | pipek1 encrypt --bip85-identity 1 --bip85-index 0 --mnemonic-fd 3
 
 ---
 
-### 3.2 Decryption (`pipek1 decrypt`)
+### 3.2 Decryption (`pipe-k1 decrypt`)
 ```bash
 # Mode 2 (Anonymous Decrypt - Default Spool-and-Verify):
-cat file.tar.pk | PIPEK1_SEC_KEY="$MY_NSEC" pipek1 decrypt > file.tar
+cat file.tar.pk | PIPEK1_SEC_KEY="$MY_NSEC" pipe-k1 decrypt > file.tar
 
 # Mode 1 (Authenticated Decrypt with Expected Sender Validation - Mandatory --sender):
-cat file.tar.pk | PIPEK1_SEC_KEY="$MY_NSEC" pipek1 decrypt --sender "$EXPECTED_SENDER_NPUB" > file.tar
+cat file.tar.pk | PIPEK1_SEC_KEY="$MY_NSEC" pipe-k1 decrypt --sender "$EXPECTED_SENDER_NPUB" > file.tar
 
 # Mode 1 (Untrusted Sender Ingestion with Explicit Opt-In):
-cat file.tar.pk | PIPEK1_SEC_KEY="$MY_NSEC" pipek1 decrypt --allow-untrusted-sender > file.tar
+cat file.tar.pk | PIPEK1_SEC_KEY="$MY_NSEC" pipe-k1 decrypt --allow-untrusted-sender > file.tar
 
 # Piped Streaming Mode (Forfeits post-stream rollback for multi-gigabyte pipes):
-cat file.tar.pk | PIPEK1_SEC_KEY="$MY_NSEC" pipek1 decrypt --allow-unverified-stream | tar -xz
+cat file.tar.pk | PIPEK1_SEC_KEY="$MY_NSEC" pipe-k1 decrypt --allow-unverified-stream | tar -xz
 ```
 * **Flags:**
   * `--sec-fd <N>` / `--sec-file <path>`: Recipient private key source.
   * `--sender <npub|hex>`: Enforces that message originated from this exact sender in Mode 1.
-    * **Anti-Bypass Invariant:** If `--sender` is provided on the CLI and the wire header indicates Mode `0x02` (Anonymous), `pipek1 decrypt` **aborts immediately** with exit code `1` prior to releasing any plaintext.
-  * `--allow-untrusted-sender`: Permits Mode 1 decryption when `--sender` is omitted. When active, `pipek1 decrypt` validates the trailer signature against the embedded `SenderPubkey` and emits an informational warning to `stderr`: `Notice: Decrypted Mode 1 stream authenticated by untrusted sender <npub>`. If neither `--sender` nor `--allow-untrusted-sender` is passed for a Mode 1 stream, `pipek1 decrypt` **aborts with exit code `2`** (configuration failure). In Mode 2, this flag is safely ignored.
+    * **Anti-Bypass Invariant:** If `--sender` is provided on the CLI and the wire header indicates Mode `0x02` (Anonymous), `pipe-k1 decrypt` **aborts immediately** with exit code `1` prior to releasing any plaintext.
+  * `--allow-untrusted-sender`: Permits Mode 1 decryption when `--sender` is omitted. When active, `pipe-k1 decrypt` validates the trailer signature against the embedded `SenderPubkey` and emits an informational warning to `stderr`: `Notice: Decrypted Mode 1 stream authenticated by untrusted sender <npub>`. If neither `--sender` nor `--allow-untrusted-sender` is passed for a Mode 1 stream, `pipe-k1 decrypt` **aborts with exit code `2`** (configuration failure). In Mode 2, this flag is safely ignored.
   * `--allow-unverified-stream`: Disables default spooling across Mode 1 and Mode 2, streaming authenticated chunks directly to stdout as they arrive. Downstream consumers are warned that on-the-fly streaming cannot rollback already-emitted stdout bytes if trailing garbage, premature EOF, or trailer forgery occurs at stream termination.
   * `--max-size <bytes>`: Optional defense-in-depth size ceiling. If spooled bytes exceed `<bytes>`, decryption aborts immediately with exit code `2` and cryptographically shreds the spool, preventing unbounded disk exhaustion from unauthenticated senders.
   * `--mnemonic-fd <N>` / `--passphrase-fd <N>` / `--bip85-identity <N>` / `--bip85-index <N>`: BIP-85 key resolution.
 * **Encrypted Spooling & Universal Zero RUP Enforcement (Mode 1 & Mode 2 Default):**
-  * By default, `pipek1 decrypt` enforces strict spool-and-verify across **both Mode 1 and Mode 2**:
+  * By default, `pipe-k1 decrypt` enforces strict spool-and-verify across **both Mode 1 and Mode 2**:
     * Buffers plaintext in resident memory up to $16\text{ MiB}$.
     * If payload exceeds $16\text{ MiB}$, excess data is spooled to an anonymous disk file via `open(dir, O_TMPFILE | O_RDWR, 0600)` in `${TMPDIR:-/tmp}` (fallback to `mkstemp()` with immediate `unlink()`). Explicit POSIX permissions `0600` (`S_IRUSR | S_IWUSR`) are enforced.
   * **Spool Framing Specification:** Spooled blocks are framed as:
@@ -240,13 +240,13 @@ cat file.tar.pk | PIPEK1_SEC_KEY="$MY_NSEC" pipek1 decrypt --allow-unverified-st
     * **Nonce (12B):** `Bytes 0..7`: 64-bit big-endian sequential block index counter ($0, 1, 2, \dots$). `Bytes 8..11`: `0x00 0x00 0x00 0x00`.
     * **Spool AAD (12B):** $\text{BlockIndex}[8\text{B BE}] \parallel L[4\text{B BE}]$. This binds block order and block length to prevent disk sector manipulation.
   * **Instant Cryptographic Erasure:** Invalidation of temporary spool files is performed via **instant cryptographic erasure** (zeroizing the ephemeral 256-bit spool key in memory and closing the unlinked descriptor). Disk blocks are not synchronously zero-filled, preventing disk I/O thrashing / DoS attacks.
-  * Plaintext is decrypted from the spool and released to `stdout` only after the entire stream is authenticated (trailer signature in Mode 1, terminal chunk in Mode 2) and post-stream EOF verified. If any verification step fails, all memory and temporary descriptors are wiped, zero bytes are emitted to `stdout`, and `pipek1` exits with code `1`.
+  * Plaintext is decrypted from the spool and released to `stdout` only after the entire stream is authenticated (trailer signature in Mode 1, terminal chunk in Mode 2) and post-stream EOF verified. If any verification step fails, all memory and temporary descriptors are wiped, zero bytes are emitted to `stdout`, and `pipe-k1` exits with code `1`.
 
 ---
 
-### 3.3 Signing (`pipek1 sign`)
+### 3.3 Signing (`pipe-k1 sign`)
 ```bash
-cat release.tar.gz | PIPEK1_SEC_KEY="$NSEC" pipek1 sign > release.tar.gz.sig
+cat release.tar.gz | PIPEK1_SEC_KEY="$NSEC" pipe-k1 sign > release.tar.gz.sig
 ```
 * **Flags:**
   * `--raw`: Outputs raw 105-byte binary payload (default is ASCII armored).
@@ -255,46 +255,46 @@ cat release.tar.gz | PIPEK1_SEC_KEY="$NSEC" pipek1 sign > release.tar.gz.sig
 
 ---
 
-### 3.4 Verification (`pipek1 verify`)
+### 3.4 Verification (`pipe-k1 verify`)
 ```bash
 # 1. Standard Detached Verification (Zero stdout output; exit 0 or 1):
-cat release.tar.gz | pipek1 verify --pub "$NPUB" --sig release.tar.gz.sig
+cat release.tar.gz | pipe-k1 verify --pub "$NPUB" --sig release.tar.gz.sig
 
 # 2. Pipeline Pass-Through (Emits verified bytes to stdout only after EOF validation):
-cat release.tar.gz | pipek1 verify --pass-through --pub "$NPUB" --sig release.tar.gz.sig | tar -xz
+cat release.tar.gz | pipe-k1 verify --pass-through --pub "$NPUB" --sig release.tar.gz.sig | tar -xz
 ```
 * **Signer Trust Mandate:**
   * Signature intake auto-detects binary `PKSG` payload or ASCII-armored block.
-  * If `--pub <npub|hex>` is provided and does not match the signer key embedded in the signature, `pipek1 verify` aborts immediately with exit code `1`.
-  * If `--pub` is omitted in standard mode, `pipek1` reads the `Signer Pubkey` from the 105-byte signature payload and emits an informational notice to `stderr`: `Notice: Verifying against embedded untrusted pubkey <npub>`.
-  * **Pass-Through Guard:** When `--pass-through` is active, `--pub <npub|hex>` is **mandatory**. Omitting `--pub` during `--pass-through` causes `pipek1 verify` to abort immediately with exit code `2`, preventing arbitrary untrusted code execution in pipelines.
+  * If `--pub <npub|hex>` is provided and does not match the signer key embedded in the signature, `pipe-k1 verify` aborts immediately with exit code `1`.
+  * If `--pub` is omitted in standard mode, `pipe-k1` reads the `Signer Pubkey` from the 105-byte signature payload and emits an informational notice to `stderr`: `Notice: Verifying against embedded untrusted pubkey <npub>`.
+  * **Pass-Through Guard:** When `--pass-through` is active, `--pub <npub|hex>` is **mandatory**. Omitting `--pub` during `--pass-through` causes `pipe-k1 verify` to abort immediately with exit code `2`, preventing arbitrary untrusted code execution in pipelines.
 * **Pass-Through Memory Bound Enforcement & Encrypted Disk Spooling:** 
   Spools to resident RAM up to $16\text{ MiB}$. If larger, spills to anonymous disk storage in `${TMPDIR:-/tmp}` using `open(dir, O_TMPFILE | O_RDWR, 0600)` (or `mkstemp` + immediate `unlink`). Spooled blocks are encrypted and authenticated using the identical sequential `AEAD_CHACHA20_POLY1305` ephemeral RAM-only construction and framing specified in Section 3.2. Output is flushed to `stdout` only if EOF verification passes.
 
 ---
 
-## 4. Git Plumbing Contract (`pipek1-git-shim`)
+## 4. Git Plumbing Contract (`pipe-k1-git-shim`)
 
-Git invokes external signing binaries directly via `execvp(prog, argv)` without shell expansion. Therefore, Git integration is packaged as a dedicated standalone executable or symlink: `pipek1-git-shim`.
+Git invokes external signing binaries directly via `execvp(prog, argv)` without shell expansion. Therefore, Git integration is packaged as a dedicated standalone executable or symlink: `pipe-k1-git-shim`.
 
 Configuration:
 ```bash
-git config gpg.program "pipek1-git-shim"
+git config gpg.program "pipe-k1-git-shim"
 git config user.signingkey "npub1..." # or hex pubkey
 ```
 
 ### 4.1 CLI Argument Handling & Compatibility Flags
-Git invokes `pipek1-git-shim` with standard OpenPGP flags. Cosmetic or GnuPG-specific flags (`--batch`, `--no-tty`, `--display-charset=*`, `--keyid-format=*`, `--extra-check-level=*`) are accepted and safely ignored.
+Git invokes `pipe-k1-git-shim` with standard OpenPGP flags. Cosmetic or GnuPG-specific flags (`--batch`, `--no-tty`, `--display-charset=*`, `--keyid-format=*`, `--extra-check-level=*`) are accepted and safely ignored.
 
 ### 4.2 Commit Signing Protocol (`git commit -S`)
-1. Git executes `pipek1-git-shim -bsau <keyid>` (flags may be split or combined; `--status-fd=N` is optional).
+1. Git executes `pipe-k1-git-shim -bsau <keyid>` (flags may be split or combined; `--status-fd=N` is optional).
 2. Reads commit payload from `stdin`.
 3. **Key Resolution & Validation:**
    * Resolves private key from `PIPEK1_SEC_KEY`, `--sec-file`, or `~/.config/pipek1/git_key`.
    * Calculates derived public key coordinate $X = \text{point\_x}(sk \cdot G)$.
    * If `<keyid>` is provided, validates that $X$ matches `<keyid>` (whether provided as Bech32 `npub` or hex).
    * **Failure Handling:** If `<keyid>` cannot be resolved or does not match:
-     - Emits human-readable diagnostic to `stderr`: `pipek1-git-shim: error: signing key <keyid> does not match configured secret key\n`.
+     - Emits human-readable diagnostic to `stderr`: `pipe-k1-git-shim: error: signing key <keyid> does not match configured secret key\n`.
      - Writes status line `[GNUPG:] INV_SGNR 0 <keyid>\n` to `--status-fd=N` (if provided).
      - Exits immediately with code `2`.
 4. Computes BIP-340 tagged signature over commit payload using tag `"pipek1/v1/sign"`.
@@ -312,7 +312,7 @@ Git invokes `pipek1-git-shim` with standard OpenPGP flags. Cosmetic or GnuPG-spe
    Exits `0`.
 
 ### 4.3 Commit Verification Protocol (`git log --show-signature`)
-1. Git executes: `pipek1-git-shim --status-fd=N --keyid-format=long --verify <sig_path> <data_path>`.
+1. Git executes: `pipe-k1-git-shim --status-fd=N --keyid-format=long --verify <sig_path> <data_path>`.
 2. Reads signature from `<sig_path>`. If `<data_path>` is `-`, reads data from `stdin`; otherwise reads file at `<data_path>`.
 3. **Signature Parsing & Malformed Packet Fallback:**
    * Unpacks the 105-byte payload, extracting `Timestamp`, `Signer Pubkey`, and the 64-byte Schnorr signature.
@@ -322,7 +322,7 @@ Git invokes `pipek1-git-shim` with standard OpenPGP flags. Cosmetic or GnuPG-spe
        [GNUPG:] NEWSIG\n
        [GNUPG:] ERRSIG 0000000000000000 1 8 00 0000000000 9\n
        ```
-     - Emits diagnostic to `stderr`: `pipek1-git-shim: error: malformed or unrecognized signature format\n`.
+     - Emits diagnostic to `stderr`: `pipe-k1-git-shim: error: malformed or unrecognized signature format\n`.
      - Exits immediately with code `1`.
 4. Computes `MessageDigest = SHA-256(TagHash || TagHash || Timestamp || SHA-256(CommitData))`.
 5. **Strict Repository Trust Resolution Protocol:**
@@ -392,7 +392,7 @@ Git invokes `pipek1-git-shim` with standard OpenPGP flags. Cosmetic or GnuPG-spe
 | **Spool Cleanup Disk Thrashing**| Cryptographic Erasure | Spool invalidated instantly by zeroing RAM key and closing unlinked descriptor; no disk zero-fill. |
 | **Git In-Tree Trust Hijacking**| Untrusted Tree Shield | Tracked in-tree `.pipek1_signers` ignored by default; trust anchored in config or `$GIT_DIR`. |
 | **Git Linked Worktree Isolation**| `commondir` Traversal | Resolves `commondir` pointer in linked worktrees to inherit main repository trust anchors. |
-| **Git Invocation Syntax Mismatch**| Dedicated `pipek1-git-shim` | Avoids shell string parsing failures in native Git `execvp()` execution model. |
+| **Git Invocation Syntax Mismatch**| Dedicated `pipe-k1-git-shim` | Avoids shell string parsing failures in native Git `execvp()` execution model. |
 | **Git Status Parser Deadlock**| Strict `\n` Line Framing | Every status-FD line explicitly terminated with `\n` (`0x0A`). |
 | **Bare Key Trustfile Display Bug**| Npub Identity Fallback | Emits `<npub>` when trust entry identity is empty, preventing `Good signature from ""` bug. |
 | **Git Foreign Sig Porcelain Crash**| ERRSIG Fallback Protocol | Emits standard `ERRSIG` on status-FD for non-pipek1/malformed packets; exits `1`. |

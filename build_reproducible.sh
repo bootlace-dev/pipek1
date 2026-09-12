@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 bootlace-dev
-# 100% Byte-for-Byte Bit-Identical Reproducible Release Builder for pipek1
+# 100% Byte-for-Byte Bit-Identical Reproducible Release Builder for pipe-k1
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SOURCE_DATE_EPOCH=1700000000
 export TZ=UTC
 
-echo "Building pipek1 static release binary in reproducible alpine container..."
+echo "Building pipe-k1 static release binary in reproducible alpine container..."
 docker run --rm \
     -u "$(id -u):$(id -g)" \
     -v "$ROOT_DIR/rust":/code \

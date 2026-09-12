@@ -4,15 +4,15 @@
 
 set -euo pipefail
 
-PIPEK1="/home/bootlace/dev/pipek1/rust/target/release/pipe-k1"
-SHIM="/home/bootlace/dev/pipek1/rust/target/release/pipe-k1"
+PIPE_K1="/home/bootlace/dev/pipe-k1/rust/target/release/pipe-k1"
+SHIM="/home/bootlace/dev/pipe-k1/rust/target/release/pipe-k1"
 
 ALICE_PRIV="0101010101010101010101010101010101010101010101010101010101010101"
 ALICE_PUB="1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
 BOB_PRIV="0202020202020202020202020202020202020202020202020202020202020202"
 BOB_PUB="4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
 
-TMP_DIR="/tmp/pipek1_adversarial_$$"
+TMP_DIR="/tmp/pipe-k1_adversarial_$$"
 mkdir -p "$TMP_DIR"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -23,7 +23,7 @@ echo "=================================================================="
 
 # Generate 65,546 byte payload to force intermediate + terminal chunk
 python3 -c "import sys; sys.stdout.buffer.write(b'A' * 65546)" > "$TMP_DIR/payload_65k.bin"
-"$PIPEK1" encrypt --recipient "$BOB_PUB" < "$TMP_DIR/payload_65k.bin" > "$TMP_DIR/ct_65k.bin"
+"$PIPE_K1" encrypt --recipient "$BOB_PUB" < "$TMP_DIR/payload_65k.bin" > "$TMP_DIR/ct_65k.bin"
 
 # Test 1: Chunk Stuffing & Intermediate Chunk Size Invariant
 echo -n "[TEST 1] Intermediate chunk length < 64 KiB rejection: "
@@ -36,7 +36,7 @@ with open('$TMP_DIR/tampered_len.bin', 'wb') as f:
     f.write(ct)
 "
 set +e
-PIPEK1_SEC_KEY="$BOB_PRIV" "$PIPEK1" decrypt < "$TMP_DIR/tampered_len.bin" > "$TMP_DIR/out" 2>/dev/null
+PIPEK1_SEC_KEY="$BOB_PRIV" "$PIPE_K1" decrypt < "$TMP_DIR/tampered_len.bin" > "$TMP_DIR/out" 2>/dev/null
 EC=$?
 set -e
 if [ "$EC" -eq 1 ] && [ ! -s "$TMP_DIR/out" ]; then
@@ -57,7 +57,7 @@ with open('$TMP_DIR/tampered_term.bin', 'wb') as f:
     f.write(ct)
 "
 set +e
-PIPEK1_SEC_KEY="$BOB_PRIV" "$PIPEK1" decrypt < "$TMP_DIR/tampered_term.bin" > "$TMP_DIR/out" 2>/dev/null
+PIPEK1_SEC_KEY="$BOB_PRIV" "$PIPE_K1" decrypt < "$TMP_DIR/tampered_term.bin" > "$TMP_DIR/out" 2>/dev/null
 EC=$?
 set -e
 if [ "$EC" -eq 1 ] && [ ! -s "$TMP_DIR/out" ]; then
@@ -76,7 +76,7 @@ with open('$TMP_DIR/garbage.bin', 'wb') as f:
     f.write(ct + b'MALICIOUS_TRAILING_GARBAGE_BYTES')
 "
 set +e
-PIPEK1_SEC_KEY="$BOB_PRIV" "$PIPEK1" decrypt < "$TMP_DIR/garbage.bin" > "$TMP_DIR/out" 2>/dev/null
+PIPEK1_SEC_KEY="$BOB_PRIV" "$PIPE_K1" decrypt < "$TMP_DIR/garbage.bin" > "$TMP_DIR/out" 2>/dev/null
 EC=$?
 set -e
 if [ "$EC" -eq 1 ] && [ ! -s "$TMP_DIR/out" ]; then
@@ -106,7 +106,7 @@ PIPEK1_SEC_KEY="$ALICE_PRIV" git -C "$GIT_TEST_DIR" commit -q -m "Signed commit 
 
 # Add Alice to repository allowed signers file
 mkdir -p "$GIT_TEST_DIR/.git"
-echo "Alice <alice@test.local> $ALICE_PUB" > "$GIT_TEST_DIR/.git/pipek1_signers"
+echo "Alice <alice@test.local> $ALICE_PUB" > "$GIT_TEST_DIR/.git/pipe-k1_signers"
 
 # Verify signature via git log --show-signature
 SIG_LOG=$(git -C "$GIT_TEST_DIR" log --show-signature -n 1)
@@ -125,10 +125,10 @@ DATA_20MB="$TMP_DIR/payload_20mb.bin"
 head -c 20971520 /dev/urandom > "$DATA_20MB"
 
 # Encrypt Mode 1
-PIPEK1_SEC_KEY="$ALICE_PRIV" "$PIPEK1" encrypt --mode 1 --recipient "$BOB_PUB" < "$DATA_20MB" > "$TMP_DIR/mode1_20mb.pk"
+PIPEK1_SEC_KEY="$ALICE_PRIV" "$PIPE_K1" encrypt --mode 1 --recipient "$BOB_PUB" < "$DATA_20MB" > "$TMP_DIR/mode1_20mb.pk"
 
 # Decrypt Mode 1 verifying against ALICE_PUB
-PIPEK1_SEC_KEY="$BOB_PRIV" "$PIPEK1" decrypt --sender "$ALICE_PUB" < "$TMP_DIR/mode1_20mb.pk" > "$TMP_DIR/recovered_20mb.bin" 2>/dev/null
+PIPEK1_SEC_KEY="$BOB_PRIV" "$PIPE_K1" decrypt --sender "$ALICE_PUB" < "$TMP_DIR/mode1_20mb.pk" > "$TMP_DIR/recovered_20mb.bin" 2>/dev/null
 
 if cmp -s "$DATA_20MB" "$TMP_DIR/recovered_20mb.bin"; then
     echo "PASS (20 MiB bit-for-bit identical recovered across O_TMPFILE spool)"
@@ -140,7 +140,7 @@ fi
 # Test 6: Entropy Hedging with Empty FD (Must Abort with Exit Code 2)
 echo -n "[TEST 6] Empty --entropy-fd abort handling: "
 set +e
-echo -n "Test payload" | "$PIPEK1" encrypt --recipient "$BOB_PUB" --entropy-fd 3 3< /dev/null 2>/dev/null
+echo -n "Test payload" | "$PIPE_K1" encrypt --recipient "$BOB_PUB" --entropy-fd 3 3< /dev/null 2>/dev/null
 EC=$?
 set -e
 if [ "$EC" -eq 2 ]; then
@@ -157,7 +157,7 @@ cp "$TMP_DIR/mode1_20mb.pk" "$TMP_DIR/mode1_20mb_corrupt.pk"
 printf '\xff' | dd of="$TMP_DIR/mode1_20mb_corrupt.pk" bs=1 seek=500000 count=1 conv=notrunc status=none
 
 set +e
-PIPEK1_SEC_KEY="$BOB_PRIV" "$PIPEK1" decrypt --sender "$ALICE_PUB" < "$TMP_DIR/mode1_20mb_corrupt.pk" > "$TMP_DIR/corrupt_out" 2>/dev/null
+PIPEK1_SEC_KEY="$BOB_PRIV" "$PIPE_K1" decrypt --sender "$ALICE_PUB" < "$TMP_DIR/mode1_20mb_corrupt.pk" > "$TMP_DIR/corrupt_out" 2>/dev/null
 EC=$?
 set -e
 if [ "$EC" -eq 1 ] && [ ! -s "$TMP_DIR/corrupt_out" ]; then
@@ -171,7 +171,7 @@ fi
 echo -n "[TEST 8] Git Porcelain pipek1.allowedSignersFile configuration: "
 GLOBAL_SIGNERS="$TMP_DIR/global_signers"
 echo "ExternalSigner <ext@test.local> $ALICE_PUB" > "$GLOBAL_SIGNERS"
-rm -f "$GIT_TEST_DIR/.git/pipek1_signers"
+rm -f "$GIT_TEST_DIR/.git/pipe-k1_signers"
 git -C "$GIT_TEST_DIR" config pipek1.allowedSignersFile "$GLOBAL_SIGNERS"
 
 SIG_LOG_EXT=$(git -C "$GIT_TEST_DIR" log --show-signature -n 1)

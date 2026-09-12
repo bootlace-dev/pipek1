@@ -1,5 +1,5 @@
 {
-  "description": "Historical public keys, npubs, and on-chain references from the Bitcoin / Liquid / Nostr ecosystem for pipek1 test vectors",
+  "description": "Historical public keys, npubs, and on-chain references from the Bitcoin / Liquid / Nostr ecosystem for pipe-k1 test vectors",
   "entities": {
     "blockstream_security": {
       "role": "Liquid sidechain maintainer & security response",
